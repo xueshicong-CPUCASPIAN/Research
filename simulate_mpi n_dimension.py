@@ -19,40 +19,28 @@ def pmap(rho):
 def rhomap(p):
     return p/(1-p) # odds of success
 
-def p_prime_sel_opt(p, delt_opt, effects, V_s): #modify because now delt_opt is n-dimen
-    # original input parameters: p,delt_opt,gam,sign,V_s
-    S=1/(2*V_s) #V_s is the strength of stabilizing selection. Larger V_s, weaker selection.
-
-    # p=pmap(rhomap(p)*np.exp(2*S*gam*sign*(delt_opt+0.5*gam*sign*(2*p-1))))  
-    # split it into two parts.
-    # first, gam*sign*delt_opt. In n-dimen, gam*sign*delt_opt is the dot product of two n-dimen vectors.
-    # second, gam*sign*0.5*gam*sign*(2*p-1). It is a norm.
-    # delt_opt = opt - z_bar
-    # gam = gamma, is the effect magnitude. In 1-dimen, set gam as a.
-    # p = allele frequency  
+def p_prime_sel_opt(p, delt_opt, effects, V_s):
     """
-    p:        (L, rep)      allele frequencies
-    delt_opt: (T, rep)      opt - zbar for each trait and replicate
-    effects:  (L, T)        mutation effect vector for each locus
-    V_s: scalar
+    p:        (L, rep)
+    delt_opt: (T, rep)
+    effects:  (L, rep, T)
     """
     S = 1 / (2 * V_s)
 
-    # dot_term[l, r] = sum_t effects[l, t] * delt_opt[t, r]
-    dot_term = np.einsum('lt,tr->lr', effects, delt_opt)
+    # dot_term[l, r] = sum_t effects[l, r, t] * delt_opt[t, r]
+    dot_term = np.einsum('lrt,tr->lr', effects, delt_opt)
 
-    # norm2[l, 1] = sum_t effects[l, t]^2
-    norm2 = np.sum(effects**2, axis=1, keepdims=True)
+    # norm2[l, r] = sum_t effects[l, r, t]^2
+    norm2 = np.sum(effects**2, axis=2)
 
     expo = 2 * S * (dot_term + 0.5 * norm2 * (2 * p - 1))
-
     p_new = pmap(rhomap(p) * np.exp(expo))
     return p_new
 
 def simulate(param):
     L,sigma_e2,N,V_s,mu,a2,theta,n_traits,rep=param # add n_traits and rep to param tuple
     a = np.sqrt(a2) # still use a2 as the variance of mutational effects, but now mutational effects are n-dimensional vectors.
-    effects = np.random.normal(0, a, size=(L, n_traits)) # mutational effects for L loci and n traits
+    effects = np.random.normal(0, a, size=(L, rep, n_traits)) # mutational effects for L loci and n traits
     opt = np.zeros((n_traits, rep)) # optimum for n traits and rep replicate populations
     p=np.zeros([L,rep]) #frequency of mutant allele at each locus and replicate population
     maxiter=int(10*N)
@@ -64,11 +52,11 @@ def simulate(param):
             print("now time is ", t)
         #Reset fixed loci and remove them from optimum
         p[fixed_loci_1]=0
-        opt=opt-2*np.einsum('lr,lt->tr', fixed_loci_1, effects) #re-centered to save computation
+        opt=opt-2*np.einsum('lr,lrt->tr', fixed_loci_1, effects) #re-centered to save computation
         
         allele_expected = (2*p**2 + 2*p*(1-p))   # AA Aa aa, expected number with A frequency p.  shape L by rep.
         # 2*p^2 for AA, 2p(1-p) for Aa, 0 for aa.
-        zbar = np.einsum('lr,lt->tr', allele_expected, effects) # mean phenotype for n traits and rep populations.
+        zbar = np.einsum('lr,lrt->tr', allele_expected, effects) # mean phenotype for n traits and rep populations.
         # shape of allele_expected is L by rep, shape of effects is L by n_traits, so the output shape is n_traits by rep.
         
         fixed_loci_0=(p==0)
@@ -78,7 +66,9 @@ def simulate(param):
         # p==0 this mutation is absent in this population now.
         np.place(p,mutation_mask,1/N) # replace p = 0 with 1/N
         new_idx = np.where(mutation_mask)  # get the indices of new mutations
-        effects[new_idx[0], :] = np.random.normal(0, a, size=(len(new_idx[0]), n_traits))
+        new_idx = np.where(mutation_mask)   # new_idx[0]=locus, new_idx[1]=replicate
+        effects[new_idx[0], new_idx[1], :] = np.random.normal(0, a, size=(len(new_idx[0]), n_traits)
+)
         # for each new mutation, assign it a new mutational effect drawn from the normal distribution.
 
         # generate #np.sum(mutation_mask) random integers whose values are 0 or 1
@@ -112,7 +102,7 @@ def simulate(param):
 
 #sigma_e2s=np.array([0,1e-4,5e-4,1e-3,5e-3,1e-2])
 sigma_e2s=np.array([1e-2])
-Ls=np.array([1000]) # number of loci
+Ls=np.array([100]) # number of loci
 #Ls=np.array([10,20,50,100,200,500,1000])
 Ns=np.array([10000])
 #Ns=np.array([100,200,500,1000,2000,5000,10000,20000,50000,100000])
@@ -123,7 +113,7 @@ mus=np.array([6.6e-6])
 thetas=np.array([0e-1])
 #a2s=np.array([0.001,0.002,0.005,0.01,0.02,0.05,0.1])
 a2s=np.array([0.1])
-all_reps=1000 # rep = number of replicate populations simulated in parallel. For MPI splitting.
+all_reps=100 # rep = number of replicate populations simulated in parallel. For MPI splitting.
 n_traits = np.array([3]) #add n_traits # for itertools.product, it needs to be an array, not a scalar.
 
 comm = MPI.COMM_WORLD
