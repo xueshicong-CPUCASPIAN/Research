@@ -83,8 +83,12 @@ def split_traj(hist):
 
 #%%
 #Load data
+import numpy as np
+# fname="Vg_sims_th0"
+# original code
 
-fname="Vg_sims_th0"
+fname="Vg_sims_n_dimension_effects_correct_L100_rep100" # modify filename
+
 with open(fname,'r') as fin:
     params=eval(fin.readline()[2:-1])
     #parameter format: L,sigma_e2,N,V_s,mu,a2,theta,rep
@@ -99,7 +103,7 @@ delt=np.loadtxt('delta_hist_001.txt')
 ######################################
 #%%
 #timeseries figure
-
+import matplotlib.pyplot as plt
 fig, axs=plt.subplots(3,1,figsize=[3,6])
 
 t1=95000
@@ -250,7 +254,7 @@ axs[0].legend(by_label.values(), by_label.keys(), loc=[0.01,.7],fontsize=9)
 #%%
 #Latter-Bulmer_fluctuation predictions 
 import matplotlib.patches as mpatches
-
+import matplotlib.pyplot as plt
 mu=6.6e-9
 sigma2=1e-2
 N=10000
@@ -488,7 +492,7 @@ plt.savefig("stablizing_fluc.eps")
 
 #%%
 #Chasing optimum picture
-
+import numpy as np
 x=np.linspace(-2,2.1,1000)
 
 fig,ax=plt.subplots(figsize=[4,2.7])
