@@ -91,8 +91,8 @@ def simulate(param):
         # the number of mutant individuals/N = frequency.
         opt = (1-theta)*opt + np.random.normal(0, np.sqrt(sigma_e2), size=(n_traits, rep))#modify
         # random normal is the noise
-    return 2*a**2*np.sum(p*(1-p),0)
-    # genetic variance (no idea about the coefficient 2)
+    return 2*a**2*np.sum(p*(1-p),0) #simulation output: genetic variance V_g for each replicate population. shape (rep,).
+
 
 
 #%%
