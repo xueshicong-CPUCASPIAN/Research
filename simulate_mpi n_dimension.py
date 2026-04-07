@@ -54,8 +54,8 @@ def simulate(param):
         p[fixed_loci_1]=0
         opt=opt-2*np.einsum('lr,lrt->tr', fixed_loci_1, effects) #re-centered to save computation
         
-        allele_expected = (2*p**2 + 2*p*(1-p))   # AA Aa aa, expected number with A frequency p.  shape L by rep.
-        # 2*p^2 for AA, 2p(1-p) for Aa, 0 for aa.
+        allele_expected = (2*p**2 + p*(1-p))   # AA Aa aa, expected number with A frequency p.  shape L by rep.
+        # 2*p^2 for AA, p(1-p) for Aa, 0 for aa.
         zbar = np.einsum('lr,lrt->tr', allele_expected, effects) # mean phenotype for n traits and rep populations.
         # shape of allele_expected is L by rep, shape of effects is L by n_traits, so the output shape is n_traits by rep.
         
@@ -65,8 +65,7 @@ def simulate(param):
         # N = population size 
         # p==0 this mutation is absent in this population now.
         np.place(p,mutation_mask,1/N) # replace p = 0 with 1/N
-        new_idx = np.where(mutation_mask)  # get the indices of new mutations
-        new_idx = np.where(mutation_mask)   # new_idx[0]=locus, new_idx[1]=replicate
+        new_idx = np.where(mutation_mask)  # new_idx[0]=locus, new_idx[1]=replicate
         effects[new_idx[0], new_idx[1], :] = np.random.normal(0, a, size=(len(new_idx[0]), n_traits)
 )
         # for each new mutation, assign it a new mutational effect drawn from the normal distribution.
@@ -91,7 +90,7 @@ def simulate(param):
         # the number of mutant individuals/N = frequency.
         opt = (1-theta)*opt + np.random.normal(0, np.sqrt(sigma_e2), size=(n_traits, rep))#modify
         # random normal is the noise
-    return 2*a**2*np.sum(p*(1-p),0) #simulation output: genetic variance V_g for each replicate population. shape (rep,).
+    return 2*np.sum(np.sum(effects**2, axis=2)*p*(1-p), axis=0) #simulation output: genetic variance V_g for each replicate population. shape (rep,).
 
 
 
