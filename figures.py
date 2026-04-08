@@ -79,6 +79,8 @@ def split_traj(hist):
                 else:
                     temp.append(traj)
             
+    if len(temp) == 0:
+        return hist.transpose()
     return np.concatenate( (hist,np.array(temp)) ).transpose()
 
 #%%
