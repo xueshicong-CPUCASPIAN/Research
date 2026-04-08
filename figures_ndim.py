@@ -118,6 +118,7 @@ offset = 1e-5
 N_plot = 10000
 a2_plot = 0.1
 V_s_plot = 5  # fix V_s to one value for clarity; change to 20 if preferred
+L = params[0][0]  # L is the same for all parameter combinations
 
 # collect all n_traits values present in the output
 all_n_traits = sorted(set(p[7] for p in params))
@@ -125,17 +126,20 @@ colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(all_n_traits)))
 
 fig, ax = plt.subplots(figsize=[5, 4])
 
-for color, nt in zip(colors, all_n_traits):
+n_nt = len(all_n_traits)
+displacements = np.linspace(-0.15, 0.15, n_nt)  # spread violins horizontally
+
+for color, nt, displace in zip(colors, all_n_traits, displacements):
     indices = [i for i, p in enumerate(params)
-               if p[2] == N_plot and p[-3] == a2_plot and p[3] == V_s_plot and p[7] == nt]
+               if p[2] == N_plot and p[5] == a2_plot and p[3] == V_s_plot and p[7] == nt]
 
     for i in indices:
         L, sigma_e2, N, V_s, mu, a2, theta, n_traits, rep = params[i]
         h2 = Vg_sims[i] / (Vg_sims[i] + 1)
         parts = ax.violinplot(
             h2,
-            positions=[np.log10(sigma_e2 + offset)],
-            widths=0.25, showmeans=True)
+            positions=[np.log10(sigma_e2 + offset) + displace],
+            widths=0.08, showmeans=True)
         for pc in parts['bodies']:
             pc.set_color(color)
             pc.set_alpha(0.5)
