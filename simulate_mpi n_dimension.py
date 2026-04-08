@@ -101,20 +101,15 @@ def simulate(param):
 #Parallel handling of replicates with MPI.
 
 #sigma_e2s=np.array([0,1e-4,5e-4,1e-3,5e-3,1e-2])
-sigma_e2s=np.array([1e-2])
+sigma_e2s=np.array([0,1e-4,5e-4,1e-3,5e-3,1e-2])
 Ls=np.array([100]) # number of loci
-#Ls=np.array([10,20,50,100,200,500,1000])
 Ns=np.array([10000])
-#Ns=np.array([100,200,500,1000,2000,5000,10000,20000,50000,100000])
-Vs=np.array([5])
-#Vs=np.linspace(1,20,9)
+Vs=np.array([5,20])
 mus=np.array([6.6e-6])
-#mus=np.array([1e-7,2e-7,5e-7,1e-6,2e-6,5e-6,1e-5,2e-5,5e-5])
 thetas=np.array([0e-1])
-#a2s=np.array([0.001,0.002,0.005,0.01,0.02,0.05,0.1])
 a2s=np.array([0.1])
 all_reps=100 # rep = number of replicate populations simulated in parallel. For MPI splitting.
-n_traits = np.array([3]) #add n_traits # for itertools.product, it needs to be an array, not a scalar.
+n_traits = np.array([1,2,3,5]) # vary dimensionality to show n-D effect
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
