@@ -91,7 +91,8 @@ def simulate(param):
         opt = (1-theta)*opt + np.random.normal(0, np.sqrt(sigma_e2), size=(n_traits, rep))#modify
         # random normal is the noise
     return 2*np.sum(np.sum(effects**2, axis=2)*p*(1-p), axis=0) #simulation output: genetic variance V_g for each replicate population. shape (rep,).
-
+    # effects has shape (L, rep, n_traits), so effects**2 has shape (L, rep, n_traits). sum over axis=2 gives shape (L, rep). 
+    # multiply by p*(1-p) and sum over axis=0 gives shape (rep,). multiply by 2 gives the final output shape (rep,).
 
 
 #%%
