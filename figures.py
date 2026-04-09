@@ -89,7 +89,7 @@ import numpy as np
 # fname="Vg_sims_th0"
 # original code
 
-fname="Vg_sims_n_dimension_effects_correct_L100_rep100" # modify filename
+fname="Vg_sims_n_dimension_output1" # modify filename
 
 with open(fname,'r') as fin:
     params=eval(fin.readline()[2:-1])
@@ -340,6 +340,10 @@ patch = mpatches.Patch(color='red', alpha=0.5,
 handles.append(patch)
 plt.legend(loc='upper left',handles=handles, fontsize=4.5)
 
+if 'theta' not in dir():
+    theta=params[0][6] if len(params)>0 else 0
+if 'a2' not in dir():
+    a2=params[0][5] if len(params)>0 else 0.1
 plt.savefig('LB_fluc_'+str(N)+'_a2'+str(a2)+'_th'+str(theta)+'.pdf',bbox_inches='tight')
 
 
