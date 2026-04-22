@@ -88,9 +88,10 @@ def simulate(param):
         #p=np.random.binomial(N,p,size=sim_L)/N
         # perform n independent Bernoulli trials with success prob p, return the number of success
         # the number of mutant individuals/N = frequency.
-        opt = (1-theta)*opt + np.random.normal(0, np.sqrt(sigma_e2), size=(n_traits, rep))#modify
-        # random normal is the noise
-    return 2*np.sum(np.sum(effects**2, axis=2)*p*(1-p), axis=0) #simulation output: genetic variance V_g for each replicate population. shape (rep,).
+        opt = (1-theta)*opt + np.random.normal(0, np.sqrt(sigma_e2/n_traits), size=(n_traits, rep))
+        # divide sigma_e2 by n_traits so total ||delta_opt||^2 variance = sigma_e2 regardless of n_traits
+    return 2*np.sum(np.sum(effects**2, axis=2)*p*(1-p), axis=0) / n_traits
+    # divide by n_traits to get per-trait average Vg, comparable across different n_traits values
     # effects has shape (L, rep, n_traits), so effects**2 has shape (L, rep, n_traits). sum over axis=2 gives shape (L, rep). 
     # multiply by p*(1-p) and sum over axis=0 gives shape (rep,). multiply by 2 gives the final output shape (rep,).
 

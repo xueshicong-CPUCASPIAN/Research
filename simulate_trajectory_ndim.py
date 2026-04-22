@@ -65,7 +65,8 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits):
 
         # record state
         hist[t, :]    = p
-        Vg_hist[t]    = 2 * np.sum(np.sum(effects**2, axis=1) * p * (1 - p))
+        Vg_hist[t]    = 2 * np.sum(np.sum(effects**2, axis=1) * p * (1 - p)) / n_traits
+        # divide by n_traits to get per-trait average Vg
         delta_norm[t] = np.linalg.norm(delt)
 
         # mutation: new alleles enter at freq 1/N
@@ -87,7 +88,8 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits):
 
         # optimum shift
         if sigma_e2 > 0:
-            opt = (1 - theta) * opt + np.random.normal(0, np.sqrt(sigma_e2), size=n_traits)
+            opt = (1 - theta) * opt + np.random.normal(0, np.sqrt(sigma_e2/n_traits), size=n_traits)
+            # divide by n_traits so total ||delta_opt||^2 variance = sigma_e2 regardless of n_traits
 
     return hist, Vg_hist, delta_norm
 
