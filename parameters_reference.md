@@ -539,3 +539,154 @@ $$V_g^{LB} = 4L\mu V_s$$
 
 **Approximate prediction (σ² > 0):**
 $$V_g \approx V_g^{LB} + \sqrt{V_s \sigma^2}$$
+
+---
+
+## 8. Conceptual Explanations
+
+This section explains the key ideas behind the model in plain language,
+including derivations of important formulas.
+
+---
+
+### 8.1 What is Environmental Fluctuation?
+
+In the model, the **trait optimum** `opt` is the ideal phenotype — the
+trait value with the highest fitness. Instead of being fixed, the optimum
+moves randomly every generation, like a target that keeps shifting.
+
+**Biological example:** Imagine a bird population where the optimal beak
+size changes every year:
+- Cold year → larger beak is better
+- Warm year → smaller beak is better
+
+This moving optimum is modelled as a **random walk** (when θ = 0):
+
+$$\text{opt}_{t+1} = \text{opt}_t + \varepsilon_t, \quad \varepsilon_t \sim \mathcal{N}\!\left(0,\ \frac{\sigma^2}{T}\right) \text{ per trait component}$$
+
+So each generation, the optimum takes a small random step. The size of
+that step is controlled by σ² (sigma_e2).
+
+---
+
+### 8.2 What is σ² (sigma_e2)?
+
+σ² is an **input parameter** — you choose it when setting up the
+simulation. It is **not calculated** from other quantities.
+
+**Definition:** σ² is the expected squared displacement of the optimum
+per generation:
+
+$$\sigma^2 = E\!\left[\|\Delta\text{opt}_t\|^2\right] = E\!\left[\|\text{opt}_{t+1} - \text{opt}_t\|^2\right]$$
+
+**What Δopt means:**
+$$\Delta\text{opt}_t = \text{opt}_{t+1} - \text{opt}_t$$
+
+This is just the change in the optimum from one generation to the next.
+
+| σ² value | Meaning |
+|----------|---------|
+| 0 | Stable environment — optimum never moves |
+| 10⁻⁴ | Very slight fluctuation |
+| 10⁻³ | Moderate fluctuation |
+| 10⁻² | Strong fluctuation — optimum jumps a lot each generation |
+
+---
+
+### 8.3 Why divide by T? Derivation of E[‖Δopt‖²] = σ²
+
+**Key mathematical property:** For any random variable X with mean 0:
+$$E[X^2] = \text{Var}(X)$$
+
+In the code, each component of Δopt is drawn from N(0, σ²/T):
+```python
+np.random.normal(0, np.sqrt(sigma_e2 / n_traits), size=(n_traits, rep))
+#                   ↑ std = √(σ²/T),  so variance = σ²/T
+```
+
+Note: `np.random.normal(mean, std, size)` — the second argument is the
+**standard deviation**, NOT the variance.
+
+Therefore, for each trait component i:
+$$E[(\Delta\text{opt}_i)^2] = \text{Var}(\Delta\text{opt}_i) = \frac{\sigma^2}{T}$$
+
+Summing across all T traits:
+$$E\!\left[\|\Delta\text{opt}\|^2\right] = E\!\left[\sum_{i=1}^{T}(\Delta\text{opt}_i)^2\right] = \sum_{i=1}^{T}\frac{\sigma^2}{T} = T \times \frac{\sigma^2}{T} = \sigma^2 \checkmark$$
+
+**Why this normalisation matters:** Without dividing by T, a model with
+T=5 traits would experience 5× more total environmental noise than T=1.
+This would make it impossible to fairly compare heritability h² across
+different T values. By dividing by T, the total environmental stress is
+always exactly σ², regardless of how many traits are modelled.
+
+---
+
+### 8.4 Relationship between σ², δ, Vg, and h²
+
+The chain of causation is:
+
+$$\sigma^2 \uparrow \;\longrightarrow\; E[\|\delta\|^2] \uparrow \;\longrightarrow\; \text{directional selection} \uparrow \;\longrightarrow\; V_g \uparrow \;\longrightarrow\; h^2 \uparrow$$
+
+**Step 1 — The gap δ (displacement from optimum):**
+
+Every generation, the optimum `opt` and the population mean phenotype
+`zbar` are not the same. The gap is:
+$$\boldsymbol{\delta}_t = \text{opt}_t - \bar{z}_t$$
+
+The larger this gap, the further the population is from its fitness
+peak, and the stronger directional selection becomes.
+
+**Step 2 — Steady-state gap size:**
+
+At equilibrium, the gap reaches a balance between:
+- The optimum moving away from the population (driven by σ²)
+- The population tracking the optimum (driven by Vg)
+
+This gives the steady-state relationship (n-D):
+$$E\!\left[\|\boldsymbol{\delta}\|^2\right] \approx \frac{T \cdot V_s \cdot \sigma^2}{V_g}$$
+
+Intuition: larger σ² → optimum jumps more → larger gap. Larger Vg →
+population responds faster to selection → smaller gap.
+
+**Step 3 — How the gap drives Vg (amplification):**
+
+The gap δ creates directional selection each generation. Alleles that
+push the population toward the optimum are favoured and maintained at
+intermediate frequencies. This increases Vg above the Latter-Bulmer
+baseline:
+
+$$V_g \approx V_g^{LB} \times \left(1 + \frac{E[\|\boldsymbol{\delta}\|^2]}{V_s}\right) = V_g^{LB} \times \left(1 + \frac{T \cdot \sigma^2}{V_g}\right)$$
+
+This is a **self-consistent equation** — Vg appears on both sides —
+which can be solved to find the equilibrium Vg.
+
+**Step 4 — Effect of T (n_traits):**
+
+Higher T means more trait dimensions where each mutation can be harmful:
+$$T \uparrow \;\longrightarrow\; \text{effective purifying selection} \uparrow \;\longrightarrow\; V_g \text{ per trait} \downarrow \;\longrightarrow\; h^2 \downarrow$$
+
+This is why Figure 2 shows h² decreasing as T goes from 1 → 2 → 3 → 5.
+
+---
+
+### 8.5 Why do violin plots overlap at large σ²?
+
+In Figure 2 (violin plots of h² vs σ²), violins for different T values
+can overlap, especially at σ² = 10⁻². This happens for two reasons:
+
+**Reason 1 — Statistical spread (main reason):**
+Each violin shows the **distribution of h² across 100 replicate
+populations**. At high σ², h² values have larger variance (more
+spread). So even though T=1 has a higher *mean* h² than T=2, individual
+replicates overlap between the two groups.
+
+**Reason 2 — Small differences relative to spread:**
+At σ² = 10⁻², the mean h² values are:
+T=1: 0.120,  T=2: 0.096,  T=3: 0.088,  T=5: 0.076
+
+The gap between T=2, 3, 5 is only ~0.01–0.02, but the width of each
+violin (due to stochastic variation across replicates) is larger.
+
+This is **not a bug** — it is real biological noise. Running more
+replicates (e.g. 1000 instead of 100) would produce narrower violins
+with cleaner separation between T values.
