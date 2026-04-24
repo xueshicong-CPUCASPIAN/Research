@@ -56,8 +56,8 @@ Vg1         = np.loadtxt('Vg_hist_001_nd.txt')     # (maxiter,)
 delta_norm1 = np.loadtxt('delta_norm_001_nd.txt')  # (maxiter,)  ||δ|| norm
 delta_1_1   = np.loadtxt('delta_1_001_nd.txt')     # (maxiter,)  first component δ₁ (signed)
 
-t1 = 95000
-t2 = 100000
+t1 = 0
+t2 = 5000
 
 fig, axs = plt.subplots(3, 1, figsize=[3, 6])
 
