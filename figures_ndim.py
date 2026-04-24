@@ -53,7 +53,8 @@ hist0       = np.loadtxt('hist_000_nd.txt')        # (maxiter, L)
 Vg0         = np.loadtxt('Vg_hist_000_nd.txt')     # (maxiter,)
 hist1       = split_traj(np.loadtxt('hist_001_nd.txt'))
 Vg1         = np.loadtxt('Vg_hist_001_nd.txt')     # (maxiter,)
-delta_norm1 = np.loadtxt('delta_norm_001_nd.txt')  # (maxiter,)
+delta_norm1 = np.loadtxt('delta_norm_001_nd.txt')  # (maxiter,)  ||δ|| norm
+delta_1_1   = np.loadtxt('delta_1_001_nd.txt')     # (maxiter,)  first component δ₁ (signed)
 
 t1 = 95000
 t2 = 100000
@@ -89,11 +90,11 @@ inset.set_xticks([0, 0.6])
 inset.set_xticklabels([0, 0.6], fontsize=8)
 inset.set_xlabel(r'$h^2$', labelpad=-10)
 
-# Panel C: ||delta_t||_2
-axs[2].plot(delta_norm1[t1:t2], 'gray')
+# Panel C: first trait component of δ (signed, matches paper's 1D δ_t)
+axs[2].plot(delta_1_1[t1:t2], 'gray')
 axs[2].axhline(y=0, color='k')
 axs[2].set_xlim([0, t2 - t1])
-axs[2].set_ylabel(r'$\|\delta_t\|$', fontsize=10)
+axs[2].set_ylabel(r'$\delta_{t,1}$', fontsize=10)   # δ₁ = first trait component
 axs[2].set_xlabel(r'Generations')
 axs[2].annotate(r'$C$', [0.92, 0.87], xycoords='axes fraction', fontsize=14)
 

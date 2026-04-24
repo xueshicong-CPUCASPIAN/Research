@@ -48,6 +48,7 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits):
     hist       = np.zeros((maxiter, L))
     Vg_hist    = np.zeros(maxiter)
     delta_norm = np.zeros(maxiter)
+    delta_1    = np.zeros(maxiter)   # first trait component of δ (signed)
 
     for t in range(maxiter):
         if t % 1000 == 0:
@@ -68,6 +69,7 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits):
         Vg_hist[t]    = 2 * np.sum(np.sum(effects**2, axis=1) * p * (1 - p)) / n_traits
         # divide by n_traits to get per-trait average Vg
         delta_norm[t] = np.linalg.norm(delt)
+        delta_1[t]    = delt[0]   # first trait component (signed, for plotting)
 
         # mutation: new alleles enter at freq 1/N
         fixed_loci_0  = (p == 0)
@@ -91,7 +93,7 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits):
             opt = (1 - theta) * opt + np.random.normal(0, np.sqrt(sigma_e2/n_traits), size=n_traits)
             # divide by n_traits so total ||delta_opt||^2 variance = sigma_e2 regardless of n_traits
 
-    return hist, Vg_hist, delta_norm
+    return hist, Vg_hist, delta_norm, delta_1
 
 
 # ── parameters ────────────────────────────────────────────────────────────────
@@ -105,19 +107,20 @@ n_traits = 3   # number of trait dimensions
 
 # ── run sigma_e2 = 0 ──────────────────────────────────────────────────────────
 print("Running sigma_e2 = 0 ...")
-hist0, Vg0, _ = simulate_trajectory_nd(L, sigma_e2=0, N=N, V_s=V_s,
-                                        mu=mu, a2=a2, theta=theta, n_traits=n_traits)
+hist0, Vg0, _, _ = simulate_trajectory_nd(L, sigma_e2=0, N=N, V_s=V_s,
+                                          mu=mu, a2=a2, theta=theta, n_traits=n_traits)
 np.savetxt('hist_000_nd.txt',    hist0)
 np.savetxt('Vg_hist_000_nd.txt', Vg0)
 print("Saved hist_000_nd.txt, Vg_hist_000_nd.txt")
 
 # ── run sigma_e2 = 1e-2 ───────────────────────────────────────────────────────
 print("Running sigma_e2 = 1e-2 ...")
-hist1, Vg1, delta1 = simulate_trajectory_nd(L, sigma_e2=1e-2, N=N, V_s=V_s,
-                                             mu=mu, a2=a2, theta=theta, n_traits=n_traits)
-np.savetxt('hist_001_nd.txt',       hist1)
-np.savetxt('Vg_hist_001_nd.txt',    Vg1)
-np.savetxt('delta_norm_001_nd.txt', delta1)
-print("Saved hist_001_nd.txt, Vg_hist_001_nd.txt, delta_norm_001_nd.txt")
+hist1, Vg1, delta_norm1, delta_1_1 = simulate_trajectory_nd(L, sigma_e2=1e-2, N=N, V_s=V_s,
+                                                             mu=mu, a2=a2, theta=theta, n_traits=n_traits)
+np.savetxt('hist_001_nd.txt',         hist1)
+np.savetxt('Vg_hist_001_nd.txt',      Vg1)
+np.savetxt('delta_norm_001_nd.txt',   delta_norm1)
+np.savetxt('delta_1_001_nd.txt',      delta_1_1)
+print("Saved hist_001_nd.txt, Vg_hist_001_nd.txt, delta_norm_001_nd.txt, delta_1_001_nd.txt")
 
 print(f"Done (n_traits={n_traits}). Run figures_ndim.py to plot.")
