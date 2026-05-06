@@ -1,18 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-n-dimensional figures analogous to Figure 1 and Figure 2 in the paper.
+n-dimensional figures with FULL covariance matrix Sigma for the optimum noise.
 
-Figure 1 (time series):
-  Panel A: allele frequency trajectories (sigma_e2=0 vs sigma_e2=1e-2)
-  Panel B: heritability h² = Vg/(1+Vg) over time
-  Panel C: ||delta_t||_2 = ||opt - zbar||_2 over time
-  Requires: hist_000_nd.txt, hist_001_nd.txt,
-            Vg_hist_000_nd.txt, Vg_hist_001_nd.txt,
-            delta_norm_001_nd.txt
-  (run simulate_trajectory_ndim.py first)
+Figure 1 (4-case time series): produces 4 columns (cases A, B, C, D), each with
+3 rows (allele freq, heritability, ||delta||).
+  Requires: hist_A_nd.txt, ..., hist_D_nd.txt, Vg_hist_*, delta_norm_*, plus
+            hist_000_nd.txt, Vg_hist_000_nd.txt for the constant-optimum baseline
+  Run simulate_trajectory_ndim.py first.
 
-Figure 2 (violin plots):
-  Heritability h² vs fluctuation intensity sigma² for different n_traits
+Figure 2 (violin plots): heritability h^2 vs sigma^2 for different n_traits
   Requires: Vg_sims_n_dimension
   (run simulate_mpi n_dimension.py first)
 """
@@ -20,7 +16,7 @@ Figure 2 (violin plots):
 import numpy as np
 import matplotlib.pyplot as plt
 
-# ── helper: split trajectories at fixation (same as figures.py) ──────────────
+# ── helper: split trajectories at fixation ───────────────────────────────────
 def split_traj(hist):
     temp = []
     hist = np.array(hist.transpose())
@@ -45,58 +41,59 @@ def split_traj(hist):
 
 
 ##############################################################################
-# FIGURE 1 — time series
+# FIGURE 1 — time series for 4 covariance-matrix cases
 ##############################################################################
-print("Plotting Figure 1 (n-D time series)...")
+print("Plotting Figure 1 (4-case time series)...")
 
-hist0       = np.loadtxt('hist_000_nd.txt')        # (maxiter, L)
-Vg0         = np.loadtxt('Vg_hist_000_nd.txt')     # (maxiter,)
-hist1       = split_traj(np.loadtxt('hist_001_nd.txt'))
-Vg1         = np.loadtxt('Vg_hist_001_nd.txt')     # (maxiter,)
-delta_norm1 = np.loadtxt('delta_norm_001_nd.txt')  # (maxiter,)  ||δ|| norm
-delta_1_1   = np.loadtxt('delta_1_001_nd.txt')     # (maxiter,)  first component δ₁ (signed)
+# Case descriptions for column titles
+case_titles = {
+    'A': r'$\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=+\sigma^2$',
+    'B': r'$\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=-\sigma^2$',
+    'C': r'$\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=+\sigma^2/T$',
+    'D': r'$\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
+}
+
+# load constant-optimum baseline (same for all cases)
+hist0 = np.loadtxt('hist_000_nd.txt')
+Vg0   = np.loadtxt('Vg_hist_000_nd.txt')
 
 t1 = 0
 t2 = 5000
 
-fig, axs = plt.subplots(3, 1, figsize=[3, 6])
+fig, axs = plt.subplots(3, 4, figsize=[14, 7], sharey='row')
 
-# Panel A: allele frequency trajectories
-axs[0].plot(hist1[t1:t2, :], 'gray', linewidth=0.5)
-axs[0].plot(hist0[t1:t2, :], 'k',    linewidth=0.5)
-axs[0].set_ylim([0, 1.])
-axs[0].set_xlim([0, t2 - t1])
-axs[0].set_xticklabels([])
-axs[0].set_ylabel(r'Frequency', fontsize=10)
-axs[0].annotate(r'$A$', [0.92, 0.87], xycoords='axes fraction', fontsize=14)
+for col, label in enumerate(['A', 'B', 'C', 'D']):
+    hist = split_traj(np.loadtxt(f'hist_{label}_nd.txt'))
+    Vg   = np.loadtxt(f'Vg_hist_{label}_nd.txt')
+    dn   = np.loadtxt(f'delta_norm_{label}_nd.txt')
 
-# Panel B: heritability h² = Vg/(1+Vg)
-axs[1].plot(Vg0[t1:t2] / (1 + Vg0[t1:t2]), 'k',    label=r'$\sigma^2=0$')
-axs[1].plot(Vg1[t1:t2] / (1 + Vg1[t1:t2]), 'gray', label=r'$\sigma^2=10^{-2}$')
-axs[1].set_ylim([0, 1])
-axs[1].set_xlim([0, t2 - t1])
-axs[1].set_xticklabels([])
-axs[1].set_ylabel(r'Heritability', fontsize=10)
-axs[1].annotate(r'$B$', [0.92, 0.87], xycoords='axes fraction', fontsize=14)
-axs[1].legend(loc='upper left', fontsize=5)
+    # Panel A row: allele frequencies
+    axs[0, col].plot(hist[t1:t2, :], 'gray', linewidth=0.5)
+    axs[0, col].plot(hist0[t1:t2, :], 'k', linewidth=0.5)
+    axs[0, col].set_ylim([0, 1])
+    axs[0, col].set_xlim([0, t2 - t1])
+    axs[0, col].set_xticklabels([])
+    axs[0, col].set_title(f"Case {label}\n{case_titles[label]}", fontsize=10)
+    if col == 0:
+        axs[0, col].set_ylabel('Frequency', fontsize=11)
 
-# inset histogram of h²
-inset = axs[1].inset_axes([0.42, 0.69, 0.3, 0.30])
-inset.hist(Vg1 / (1 + Vg1), bins=20, color='gray')
-inset.hist(Vg0 / (1 + Vg0), color='k')
-inset.set_yticklabels([])
-inset.set_yticks([])
-inset.set_xticks([0, 0.6])
-inset.set_xticklabels([0, 0.6], fontsize=8)
-inset.set_xlabel(r'$h^2$', labelpad=-10)
+    # Panel B row: heritability
+    axs[1, col].plot(Vg0[t1:t2] / (1 + Vg0[t1:t2]), 'k',    label=r'$\sigma^2=0$')
+    axs[1, col].plot(Vg[t1:t2]  / (1 + Vg[t1:t2]),  'gray', label=r'$\sigma^2=10^{-2}$')
+    axs[1, col].set_ylim([0, 1])
+    axs[1, col].set_xlim([0, t2 - t1])
+    axs[1, col].set_xticklabels([])
+    if col == 0:
+        axs[1, col].set_ylabel(r'Heritability $h^2$', fontsize=11)
+        axs[1, col].legend(loc='upper left', fontsize=7)
 
-# Panel C: first trait component of δ (signed, matches paper's 1D δ_t)
-axs[2].plot(delta_1_1[t1:t2], 'gray')
-axs[2].axhline(y=0, color='k')
-axs[2].set_xlim([0, t2 - t1])
-axs[2].set_ylabel(r'$\delta_{t,1}$', fontsize=10)   # δ₁ = first trait component
-axs[2].set_xlabel(r'Generations')
-axs[2].annotate(r'$C$', [0.92, 0.87], xycoords='axes fraction', fontsize=14)
+    # Panel C row: ||delta||
+    axs[2, col].plot(dn[t1:t2], 'gray')
+    axs[2, col].axhline(y=0, color='k', linewidth=0.5)
+    axs[2, col].set_xlim([0, t2 - t1])
+    axs[2, col].set_xlabel('Generations', fontsize=11)
+    if col == 0:
+        axs[2, col].set_ylabel(r'$\|\delta_t\|$', fontsize=11)
 
 plt.tight_layout()
 plt.savefig('timeseries_ndim.pdf', bbox_inches='tight')
@@ -104,59 +101,51 @@ print("Saved timeseries_ndim.pdf")
 
 
 ##############################################################################
-# FIGURE 2 — heritability vs sigma² for different n_traits
+# FIGURE 2 — heritability vs sigma^2 for different n_traits  (unchanged)
 ##############################################################################
 print("Plotting Figure 2 (n-D violin plots)...")
 
 fname = "Vg_sims_n_dimension"
 with open(fname, 'r') as fin:
     params = eval(fin.readline()[2:-1])
-    # parameter format: L, sigma_e2, N, V_s, mu, a2, theta, n_traits, rep
 
 Vg_sims = np.loadtxt(fname)
 
-offset = 1e-5
-N_plot = 10000
-a2_plot = 0.1
-V_s_plot = 5  # fix V_s to one value for clarity; change to 20 if preferred
-L = params[0][0]  # L is the same for all parameter combinations
+offset   = 1e-5
+N_plot   = 10000
+a2_plot  = 0.1
+V_s_plot = 5
+L = params[0][0]
 
-# collect all n_traits values present in the output
 all_n_traits = sorted(set(p[7] for p in params))
 colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(all_n_traits)))
 
 fig, ax = plt.subplots(figsize=[5, 4])
-
 n_nt = len(all_n_traits)
-displacements = np.linspace(-0.15, 0.15, n_nt)  # spread violins horizontally
+displacements = np.linspace(-0.15, 0.15, n_nt)
 
 for color, nt, displace in zip(colors, all_n_traits, displacements):
     indices = [i for i, p in enumerate(params)
                if p[2] == N_plot and p[5] == a2_plot and p[3] == V_s_plot and p[7] == nt]
-
     for i in indices:
         L, sigma_e2, N, V_s, mu, a2, theta, n_traits, rep = params[i]
         h2 = Vg_sims[i] / (Vg_sims[i] + 1)
-        parts = ax.violinplot(
-            h2,
-            positions=[np.log10(sigma_e2 + offset) + displace],
-            widths=0.08, showmeans=True)
+        parts = ax.violinplot(h2,
+                              positions=[np.log10(sigma_e2 + offset) + displace],
+                              widths=0.08, showmeans=True)
         for pc in parts['bodies']:
             pc.set_color(color)
             pc.set_alpha(0.5)
         for partname in ('cbars', 'cmins', 'cmaxes', 'cmeans'):
             parts[partname].set_color(color)
 
-# legend
 handles = [plt.matplotlib.patches.Patch(color=colors[i], alpha=0.7,
            label=f'$T={int(nt)}$') for i, nt in enumerate(all_n_traits)]
 ax.legend(handles=handles, fontsize=9, title='Trait dimensions')
-
 ax.set_ylim([0, 1])
 ax.set_ylabel(r'Heritability $h^2$', fontsize=12)
 ax.set_xlabel(r'Fluctuation intensity $\sigma^2$', fontsize=12)
 ax.set_title(f'$L={int(L)},\\ V_s={V_s_plot},\\ N={N_plot}$', fontsize=11)
-
 tick_positions = [np.log10(s + offset) for s in [0, 1e-4, 1e-3, 1e-2]]
 tick_labels = [r'$0$', r'$10^{-4}$', r'$10^{-3}$', r'$10^{-2}$']
 ax.set_xticks(tick_positions)

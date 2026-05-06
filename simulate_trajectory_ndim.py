@@ -1,18 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-n-dimensional version of simulate_trajectory.py.
-Runs two single-replicate simulations and saves history files for figures_ndim.py:
+n-dimensional trajectory simulation with FULL COVARIANCE MATRIX for the
+optimum noise.  Supports 4 cases of Sigma = Cov(Delta_opt):
 
-  hist_000_nd.txt        -- allele frequency trajectories, sigma_e2=0,    shape (maxiter, L)
-  hist_001_nd.txt        -- allele frequency trajectories, sigma_e2=1e-2,  shape (maxiter, L)
-  Vg_hist_000_nd.txt     -- genetic variance per generation, sigma_e2=0,   shape (maxiter,)
-  Vg_hist_001_nd.txt     -- genetic variance per generation, sigma_e2=1e-2,shape (maxiter,)
-  delta_norm_001_nd.txt  -- ||opt - zbar||_2 per generation, sigma_e2=1e-2,shape (maxiter,)
+  Case A:  diag = sigma^2,    off-diag = +sigma^2
+  Case B:  diag = sigma^2,    off-diag = -sigma^2
+  Case C:  diag = sigma^2/T,  off-diag = +sigma^2/T
+  Case D:  diag = sigma^2/T,  off-diag = -sigma^2/T
+
+Saves trajectory files for each case:
+  hist_<case>_nd.txt        -- allele frequency trajectories  (maxiter, L)
+  Vg_hist_<case>_nd.txt     -- genetic variance per generation
+  delta_norm_<case>_nd.txt  -- ||opt - zbar||_2 per generation
+  delta_1_<case>_nd.txt     -- first trait component of delta (signed)
 """
 
 import numpy as np
 
-# ── shared functions (same as simulate_mpi n_dimension.py) ───────────────────
+# ── shared functions ─────────────────────────────────────────────────────────
 def pmap(rho):
     return rho / (1 + rho)
 
@@ -20,27 +25,34 @@ def rhomap(p):
     return p / (1 - p)
 
 def p_prime_sel_opt(p, delt_opt, effects, V_s):
-    """
-    p:        (L,)
-    delt_opt: (n_traits,)
-    effects:  (L, n_traits)
-    """
     S = 1 / (2 * V_s)
-    dot_term = np.einsum('lt,t->l', effects, delt_opt)   # (L,)
-    norm2    = np.sum(effects**2, axis=1)                 # (L,)
+    dot_term = np.einsum('lt,t->l', effects, delt_opt)
+    norm2    = np.sum(effects**2, axis=1)
     expo = 2 * S * (dot_term + 0.5 * norm2 * (2 * p - 1))
     return pmap(rhomap(p) * np.exp(expo))
 
-# ── trajectory simulation (single replicate, n-D) ────────────────────────────
-def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits):
+
+def make_cov_matrix(sigma_e2, n_traits, diag_scale, off_sign, off_scale):
     """
-    Returns:
-        hist       : (maxiter, L)   allele frequencies at every generation
-        Vg_hist    : (maxiter,)     genetic variance at every generation
-        delta_norm : (maxiter,)     ||opt - zbar||_2 at every generation
+    Build T x T covariance matrix for the optimum noise.
+
+      diag_scale : 'full' -> sigma_e2     ; 'per_trait' -> sigma_e2 / T
+      off_scale  : 'full' -> sigma_e2     ; 'per_trait' -> sigma_e2 / T
+      off_sign   : +1 or -1
     """
+    diag_val = sigma_e2 if diag_scale == 'full' else sigma_e2 / n_traits
+    off_mag  = sigma_e2 if off_scale  == 'full' else sigma_e2 / n_traits
+    off_val  = off_sign * off_mag
+
+    cov = np.full((n_traits, n_traits), off_val, dtype=float)
+    np.fill_diagonal(cov, diag_val)
+    return cov
+
+
+# ── trajectory simulation (single replicate, n-D, with cov matrix) ───────────
+def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits, cov_matrix):
     a = np.sqrt(a2)
-    effects = np.random.normal(0, a, size=(L, n_traits))  # (L, n_traits)
+    effects = np.random.normal(0, a, size=(L, n_traits))
     opt = np.zeros(n_traits)
     p   = np.zeros(L)
     maxiter = int(10 * N)
@@ -48,28 +60,26 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits):
     hist       = np.zeros((maxiter, L))
     Vg_hist    = np.zeros(maxiter)
     delta_norm = np.zeros(maxiter)
-    delta_1    = np.zeros(maxiter)   # first trait component of δ (signed)
+    delta_1    = np.zeros(maxiter)
+
+    mean_zero = np.zeros(n_traits)
 
     for t in range(maxiter):
-        if t % 1000 == 0:
-            print(f"  t = {t} / {maxiter}")
+        if t % 2000 == 0:
+            print(f"    t = {t} / {maxiter}")
 
-        # fix loci that reached p=1
         fixed_loci_1 = (p == 1)
         p[fixed_loci_1] = 0
         opt = opt - 2 * np.einsum('l,lt->t', fixed_loci_1.astype(float), effects)
 
-        allele_expected = 2 * p**2 + 2 * p * (1 - p)          # (L,)  = 2p
-        zbar = np.einsum('l,lt->t', allele_expected, effects)  # (n_traits,)
+        allele_expected = 2 * p**2 + 2 * p * (1 - p)
+        zbar = np.einsum('l,lt->t', allele_expected, effects)
+        delt = opt - zbar
 
-        delt = opt - zbar  # (n_traits,)
-
-        # record state
         hist[t, :]    = p
         Vg_hist[t]    = 2 * np.sum(np.sum(effects**2, axis=1) * p * (1 - p)) / n_traits
-        # divide by n_traits to get per-trait average Vg
         delta_norm[t] = np.linalg.norm(delt)
-        delta_1[t]    = delt[0]   # first trait component (signed, for plotting)
+        delta_1[t]    = delt[0]
 
         # mutation: new alleles enter at freq 1/N
         fixed_loci_0  = (p == 0)
@@ -88,39 +98,52 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits):
         # selection + drift
         p = np.random.binomial(N, p_prime_sel_opt(p, delt, effects, V_s)) / N
 
-        # optimum shift
+        # optimum shift using full covariance matrix
         if sigma_e2 > 0:
-            opt = (1 - theta) * opt + np.random.normal(0, np.sqrt(sigma_e2/n_traits), size=n_traits)
-            # divide by n_traits so total ||delta_opt||^2 variance = sigma_e2 regardless of n_traits
+            noise = np.random.multivariate_normal(mean_zero, cov_matrix,
+                                                   check_valid='ignore')
+            opt = (1 - theta) * opt + noise
 
     return hist, Vg_hist, delta_norm, delta_1
 
 
 # ── parameters ────────────────────────────────────────────────────────────────
-L       = 100
-N       = 10000
-V_s     = 5
-mu      = 6.6e-6
-a2      = 0.1
-theta   = 0.0
-n_traits = 3   # number of trait dimensions
+L        = 100
+N        = 10000
+V_s      = 5
+mu       = 6.6e-6
+a2       = 0.1
+theta    = 0.0
+n_traits = 3
+sigma_e2 = 1e-2
 
-# ── run sigma_e2 = 0 ──────────────────────────────────────────────────────────
-print("Running sigma_e2 = 0 ...")
-hist0, Vg0, _, _ = simulate_trajectory_nd(L, sigma_e2=0, N=N, V_s=V_s,
-                                          mu=mu, a2=a2, theta=theta, n_traits=n_traits)
+# ── 4 covariance-matrix cases ────────────────────────────────────────────────
+cases = {
+    'A': dict(diag_scale='full',      off_sign=+1, off_scale='full'),       # diag=σ²,  off=+σ²
+    'B': dict(diag_scale='full',      off_sign=-1, off_scale='full'),       # diag=σ²,  off=-σ²
+    'C': dict(diag_scale='per_trait', off_sign=+1, off_scale='per_trait'),  # diag=σ²/T, off=+σ²/T
+    'D': dict(diag_scale='per_trait', off_sign=-1, off_scale='per_trait'),  # diag=σ²/T, off=-σ²/T
+}
+
+# also keep the baseline sigma_e2=0 run for reference (constant optimum)
+print("Running sigma_e2 = 0 (baseline, constant optimum) ...")
+zero_cov = np.zeros((n_traits, n_traits))
+hist0, Vg0, _, _ = simulate_trajectory_nd(L, 0, N, V_s, mu, a2, theta, n_traits, zero_cov)
 np.savetxt('hist_000_nd.txt',    hist0)
 np.savetxt('Vg_hist_000_nd.txt', Vg0)
-print("Saved hist_000_nd.txt, Vg_hist_000_nd.txt")
 
-# ── run sigma_e2 = 1e-2 ───────────────────────────────────────────────────────
-print("Running sigma_e2 = 1e-2 ...")
-hist1, Vg1, delta_norm1, delta_1_1 = simulate_trajectory_nd(L, sigma_e2=1e-2, N=N, V_s=V_s,
-                                                             mu=mu, a2=a2, theta=theta, n_traits=n_traits)
-np.savetxt('hist_001_nd.txt',         hist1)
-np.savetxt('Vg_hist_001_nd.txt',      Vg1)
-np.savetxt('delta_norm_001_nd.txt',   delta_norm1)
-np.savetxt('delta_1_001_nd.txt',      delta_1_1)
-print("Saved hist_001_nd.txt, Vg_hist_001_nd.txt, delta_norm_001_nd.txt, delta_1_001_nd.txt")
+for label, cfg in cases.items():
+    cov = make_cov_matrix(sigma_e2, n_traits, **cfg)
+    print(f"\nCase {label}: cov matrix =\n{cov}")
+    print(f"Running case {label} ...")
 
-print(f"Done (n_traits={n_traits}). Run figures_ndim.py to plot.")
+    hist, Vg, dn, d1 = simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2,
+                                              theta, n_traits, cov)
+    np.savetxt(f'hist_{label}_nd.txt',       hist)
+    np.savetxt(f'Vg_hist_{label}_nd.txt',    Vg)
+    np.savetxt(f'delta_norm_{label}_nd.txt', dn)
+    np.savetxt(f'delta_1_{label}_nd.txt',    d1)
+    print(f"Saved hist_{label}_nd.txt, Vg_hist_{label}_nd.txt, "
+          f"delta_norm_{label}_nd.txt, delta_1_{label}_nd.txt")
+
+print(f"\nDone (n_traits={n_traits}).  Run figures_ndim.py to plot.")
