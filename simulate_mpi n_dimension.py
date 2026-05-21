@@ -39,8 +39,10 @@ def p_prime_sel_opt(p, delt_opt, effects, V_s):
 
 def simulate(param):
     L,sigma_e2,N,V_s,mu,a2,theta,n_traits,rep=param # add n_traits and rep to param tuple
-    a = np.sqrt(a2) # still use a2 as the variance of mutational effects, but now mutational effects are n-dimensional vectors.
-    effects = np.random.normal(0, a, size=(L, rep, n_traits)) # mutational effects for L loci and n traits
+    # Per-component std: each a_i ~ N(0, a2/n_traits), so E[||a||^2] = a2 regardless of n_traits.
+    # This keeps the total squared mutational size invariant in n_traits (matches 1D when n_traits=1).
+    a_per_dim = np.sqrt(a2 / n_traits)
+    effects = np.random.normal(0, a_per_dim, size=(L, rep, n_traits)) # mutational effects for L loci and n traits
     opt = np.zeros((n_traits, rep)) # optimum for n traits and rep replicate populations
     p=np.zeros([L,rep]) #frequency of mutant allele at each locus and replicate population
     maxiter=int(10*N)
@@ -66,9 +68,8 @@ def simulate(param):
         # p==0 this mutation is absent in this population now.
         np.place(p,mutation_mask,1/N) # replace p = 0 with 1/N
         new_idx = np.where(mutation_mask)  # new_idx[0]=locus, new_idx[1]=replicate
-        effects[new_idx[0], new_idx[1], :] = np.random.normal(0, a, size=(len(new_idx[0]), n_traits)
-)
-        # for each new mutation, assign it a new mutational effect drawn from the normal distribution.
+        effects[new_idx[0], new_idx[1], :] = np.random.normal(0, a_per_dim, size=(len(new_idx[0]), n_traits))
+        # for each new mutation, assign it a new mutational effect drawn from N(0, a2/n_traits) per component.
 
         # generate #np.sum(mutation_mask) random integers whose values are 0 or 1
         # np.sum(mutation_mask) is the number of new mutations.
@@ -90,9 +91,10 @@ def simulate(param):
         # the number of mutant individuals/N = frequency.
         opt = (1-theta)*opt + np.random.normal(0, np.sqrt(sigma_e2/n_traits), size=(n_traits, rep))
         # divide sigma_e2 by n_traits so total ||delta_opt||^2 variance = sigma_e2 regardless of n_traits
-    return 2*np.sum(np.sum(effects**2, axis=2)*p*(1-p), axis=0) / n_traits
-    # divide by n_traits to get per-trait average Vg, comparable across different n_traits values
-    # effects has shape (L, rep, n_traits), so effects**2 has shape (L, rep, n_traits). sum over axis=2 gives shape (L, rep). 
+    return 2*np.sum(np.sum(effects**2, axis=2)*p*(1-p), axis=0)
+    # No /n_traits here: effects are already drawn with per-component variance a2/n_traits,
+    # so sum_t effects**2 ~ a2 per locus on average, and Vg is on the same scale as the 1D case.
+    # effects has shape (L, rep, n_traits), so effects**2 has shape (L, rep, n_traits). sum over axis=2 gives shape (L, rep).
     # multiply by p*(1-p) and sum over axis=0 gives shape (rep,). multiply by 2 gives the final output shape (rep,).
 
 

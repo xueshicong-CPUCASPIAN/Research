@@ -64,8 +64,10 @@ def chol_or_svd(cov):
 
 def simulate_vec(T, cov, rep):
     """Run `rep` replicates in parallel; return final Vg per replicate."""
-    a = np.sqrt(a2)
-    effects = np.random.normal(0, a, size=(L, rep, T))
+    # Per-component std: each a_i ~ N(0, a2/T), so E[||a||^2] = a2 regardless of T.
+    # Keeps total squared mutational size invariant in T (matches 1D when T=1).
+    a_per_dim = np.sqrt(a2 / T)
+    effects = np.random.normal(0, a_per_dim, size=(L, rep, T))
     opt = np.zeros((T, rep))
     p   = np.zeros((L, rep))
     Lchol = chol_or_svd(cov)
@@ -83,7 +85,7 @@ def simulate_vec(T, cov, rep):
         mutation_mask = (np.random.rand(L, rep) < N * mu) & fixed_loci_0
         np.place(p, mutation_mask, 1 / N)
         idx = np.where(mutation_mask)
-        effects[idx[0], idx[1], :] = np.random.normal(0, a, size=(len(idx[0]), T))
+        effects[idx[0], idx[1], :] = np.random.normal(0, a_per_dim, size=(len(idx[0]), T))
 
         # mutation at polymorphic loci
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)
@@ -99,7 +101,9 @@ def simulate_vec(T, cov, rep):
         z = np.random.randn(T, rep)
         opt = (1 - theta) * opt + Lchol @ z
 
-    Vg = 2 * np.sum(np.sum(effects**2, axis=2) * p * (1 - p), axis=0) / T
+    # No /T here: effects are already drawn with per-component variance a2/T,
+    # so sum_t effects**2 ~ a2 per locus on average, and Vg is on the same scale as the 1D case.
+    Vg = 2 * np.sum(np.sum(effects**2, axis=2) * p * (1 - p), axis=0)
     return Vg
 
 
