@@ -31,8 +31,9 @@ def simulate(param):
     L,sigma_e2,N,V_s,mu,a2,theta,rep=param
     a=np.sqrt(a2)
 
-    sign=2*np.random.randint(0,2,[L,rep])-1
-    
+    sign=2*np.random.randint(0,2,[L,rep])-1 
+    # initial value. It does not matter because the first mutation will overwrite it. But we need to initialize it to avoid error.
+
     opt=np.zeros(rep)
     p=np.zeros([L,rep])
     maxiter=int(10*N)
@@ -40,8 +41,7 @@ def simulate(param):
     for t in range(maxiter): # generation
         
         fixed_loci_1=(p==1)
-        if t<10:
-            print("now time is ", t)
+       
         #Reset fixed loci and remove them from optimum
         p[fixed_loci_1]=0
         opt=opt-2*a*np.sum(sign*fixed_loci_1,0) #re-centered to save computation
@@ -50,27 +50,23 @@ def simulate(param):
         
         fixed_loci_0=(p==0)
         mutation_mask=((np.random.rand(L,rep)<N*mu) & fixed_loci_0)
-        # array/matrix L rows and rep columns. entries from 0 to 1.
-        # N = population size 
+        # array/matrix L rows and rep columns. entries are real numbers from 0 to 1.
         # p==0 this mutation is absent in this population now.
         np.place(p,mutation_mask,1/N) # replace p = 0 with 1/N
         np.place(
                 sign,mutation_mask,
                 2*np.random.randint(0,2,np.sum(mutation_mask))-1
-                )
-        # generate #np.sum(mutation_mask) random integers whose values are 0 or 1
-        # np.sum(mutation_mask) is the number of new mutations.
-        #0->0->-1,  1->2->1
+                ) # overwrite the sign for new mutations. At first, all p=0. 
+        
         
         poly_loci=np.logical_not(fixed_loci_0) & (p<1-1/N) 
-        #new mutants excluded also??? p =1/N
         #exclude alleles that are absent or almost fixed.
     
-        #p[poly_loci]=p[poly_loci]+0*mu*(1-2*p[poly_loci]) ??? nothing
         p[poly_loci]=p[poly_loci]+\
             (np.random.rand(np.sum(poly_loci))<N*mu*(1-p[poly_loci]))/N-\
                 (np.random.rand(np.sum(poly_loci))<N*mu*p[poly_loci])/N
-        #vector
+        # forward and backward mutation at poly loci. If the event happens, add or subtract 1/N to the frequency.
+        # prob of one event is alpha, then prob (x<alpha) is alpha, so we can use random number in range [0, 1) to determine if the event happens.
 
         p=np.random.binomial(N,p_prime_sel_opt(p,opt-zbar,a,sign,V_s))/N
         #p=np.random.binomial(N,p,size=sim_L)/N
