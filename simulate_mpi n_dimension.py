@@ -50,8 +50,7 @@ def simulate(param):
     for t in range(maxiter): # generation
         
         fixed_loci_1=(p==1)
-        if t%1000==0:
-            print("now time is ", t)
+       
         #Reset fixed loci and remove them from optimum
         p[fixed_loci_1]=0
         opt=opt-2*np.einsum('lr,lrt->tr', fixed_loci_1, effects) #re-centered to save computation

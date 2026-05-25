@@ -21,9 +21,9 @@ V_s       = 5
 mu        = 6.6e-6
 a2        = 0.1
 theta     = 0.0
-sigma_e2  = 1e-2
+sigma_e2  = 1e-3
 maxiter   = 30000
-rep       = 50            # replicates per (T, case)
+rep       = 100            # replicates per (T, case)
 T_list    = [1, 2, 3, 5, 10, 20, 50, 100]
 
 # ── simulation core (vectorised over replicates, like the MPI version) ───────
