@@ -24,7 +24,7 @@ L         = 100
 N         = 10000
 V_s       = 5
 mu        = 6.6e-6
-a2        = 0.1
+a2        = 0.01
 theta     = 0.0
 sigma_e2  = 1e-3
 maxiter   = 30000
@@ -131,8 +131,8 @@ for label in cases:
         a1_sq, p = data[label][T]
         save_dict[f'{label}_T{T}_a1sq'] = a1_sq
         save_dict[f'{label}_T{T}_p']    = p
-np.savez('hist_T_4cases_data.npz', **save_dict)
-print("\nSaved hist_T_4cases_data.npz")
+np.savez('hist_T_4cases_data_a_0.01.npz', **save_dict)
+print("\nSaved hist_T_4cases_data_a_0.01.npz")
 
 # ── one figure per T ─────────────────────────────────────────────────────────
 colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
@@ -173,7 +173,7 @@ for T in T_list:
                  f'(L={L}, rep={rep}, pooled over all loci × reps)',
                  fontsize=12)
     plt.tight_layout(rect=[0, 0, 1, 0.97])
-    fname = f'hist_T{T}_4cases.pdf'
+    fname = f'hist_T{T}_4cases_a_0.01.pdf'
     plt.savefig(fname, bbox_inches='tight')
     plt.close(fig)
     print(f"Saved {fname}")

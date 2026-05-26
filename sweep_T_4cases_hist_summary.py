@@ -16,9 +16,9 @@ Output:
 import numpy as np
 import matplotlib.pyplot as plt
 
-a2 = 0.1   # must match sweep_T_4cases_hist.py
+a2 = 0.01   # must match sweep_T_4cases_hist.py
 
-d = np.load('hist_T_4cases_data.npz')
+d = np.load('hist_T_4cases_data_a_0.01.npz')
 T_list = d['T_list']
 cases  = ['A', 'B', 'C', 'D']
 
@@ -88,8 +88,8 @@ ax.set_title(r'(3)  $E[p_l (1-p_l)]$  vs $T$' '\n(direct driver of $V_g$)')
 ax.grid(True, which='both', alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('hist_T_4cases_summary.pdf', bbox_inches='tight')
-print("Saved hist_T_4cases_summary.pdf")
+plt.savefig('hist_T_4cases_summary_a_0.01.pdf', bbox_inches='tight')
+print("Saved hist_T_4cases_summary_a_0.01.pdf")
 
 # Also print the numbers
 print("\n=== E[a_{1,l}^2] ===")
