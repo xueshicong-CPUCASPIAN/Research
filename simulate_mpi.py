@@ -25,6 +25,7 @@ def p_prime_sel_opt(p,delt_opt,gam,sign,V_s):
     # delt_opt = opt - z_bar
     # gam = gamma
     # p = allele frequency  
+    # euqation 2 in the paper
     return p
 
 def simulate(param):
@@ -69,13 +70,12 @@ def simulate(param):
         # prob of one event is alpha, then prob (x<alpha) is alpha, so we can use random number in range [0, 1) to determine if the event happens.
 
         p=np.random.binomial(N,p_prime_sel_opt(p,opt-zbar,a,sign,V_s))/N
-        #p=np.random.binomial(N,p,size=sim_L)/N
         # perform n independent Bernoulli trials with success prob p, return the number of success
         # the number of mutant individuals/N = frequency.
         opt=(1-theta)*opt + np.random.normal(0,np.sqrt(sigma_e2),rep)
         # random normal is the noise
     return 2*a**2*np.sum(p*(1-p),0)
-    # genetic variance (no idea about the coefficient 2)
+    # genetic variance (coefficient 2)
 
 
 #%%

@@ -19,7 +19,7 @@ L         = 100
 N         = 10000
 V_s       = 5
 mu        = 6.6e-6
-a2        = 0.1
+a2        = 0.01
 theta     = 0.0
 sigma_e2  = 1e-3
 maxiter   = 30000
@@ -181,5 +181,5 @@ ax.set_ylim([0, 1])
 ax.grid(True, axis='y', alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('violin_T_4cases.pdf', bbox_inches='tight')
-print("Saved violin_T_4cases.pdf")
+plt.savefig('violin_T_4cases_a_0.01.pdf', bbox_inches='tight')
+print("Saved violin_T_4cases_a_0.01.pdf")
