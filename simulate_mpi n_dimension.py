@@ -39,10 +39,12 @@ def p_prime_sel_opt(p, delt_opt, effects, V_s):
 
 def simulate(param):
     L,sigma_e2,N,V_s,mu,a2,theta,n_traits,rep=param # add n_traits and rep to param tuple
-    # Per-component std: each a_i ~ N(0, a2/n_traits), so E[||a||^2] = a2 regardless of n_traits.
-    # This keeps the total squared mutational size invariant in n_traits (matches 1D when n_traits=1).
-    a_per_dim = np.sqrt(a2 / n_traits)
-    effects = np.random.normal(0, a_per_dim, size=(L, rep, n_traits)) # mutational effects for L loci and n traits
+    # Effect scale A ~ Exponential(mean a2), drawn INDEPENDENTLY for each
+    # (locus, replicate, trait).  Given A, a_t ~ N(0, A/n_traits) (variance A/n_traits).
+    # => every (locus, trait) has its own size (a_t marginally Laplace);
+    #    E[a_t^2]=a2/n_traits, E[||a||^2]=a2, invariant in n_traits (matches 1D when n_traits=1).
+    A = np.random.exponential(a2, size=(L, rep, n_traits))             # per (locus, rep, trait)
+    effects = np.random.normal(0, 1, size=(L, rep, n_traits)) * np.sqrt(A / n_traits)
     opt = np.zeros((n_traits, rep)) # optimum for n traits and rep replicate populations
     p=np.zeros([L,rep]) #frequency of mutant allele at each locus and replicate population
     maxiter=int(10*N)
@@ -67,8 +69,11 @@ def simulate(param):
         # p==0 this mutation is absent in this population now.
         np.place(p,mutation_mask,1/N) # replace p = 0 with 1/N
         new_idx = np.where(mutation_mask)  # new_idx[0]=locus, new_idx[1]=replicate
-        effects[new_idx[0], new_idx[1], :] = np.random.normal(0, a_per_dim, size=(len(new_idx[0]), n_traits))
-        # for each new mutation, assign it a new mutational effect drawn from N(0, a2/n_traits) per component.
+        n_new = len(new_idx[0])
+        # each new mutation: fresh per-trait scale A ~ Exp(a2), then N(0, A/n_traits)
+        A_new = np.random.exponential(a2, size=(n_new, n_traits))
+        effects[new_idx[0], new_idx[1], :] = (np.random.normal(0, 1, size=(n_new, n_traits))
+                                              * np.sqrt(A_new / n_traits))
 
         # generate #np.sum(mutation_mask) random integers whose values are 0 or 1
         # np.sum(mutation_mask) is the number of new mutations.
@@ -90,11 +95,10 @@ def simulate(param):
         # the number of mutant individuals/N = frequency.
         opt = (1-theta)*opt + np.random.normal(0, np.sqrt(sigma_e2/n_traits), size=(n_traits, rep))
         # divide sigma_e2 by n_traits so total ||delta_opt||^2 variance = sigma_e2 regardless of n_traits
-    return 2*np.sum(np.sum(effects**2, axis=2)*p*(1-p), axis=0)
-    # No /n_traits here: effects are already drawn with per-component variance a2/n_traits,
-    # so sum_t effects**2 ~ a2 per locus on average, and Vg is on the same scale as the 1D case.
-    # effects has shape (L, rep, n_traits), so effects**2 has shape (L, rep, n_traits). sum over axis=2 gives shape (L, rep).
-    # multiply by p*(1-p) and sum over axis=0 gives shape (rep,). multiply by 2 gives the final output shape (rep,).
+    # V_g for the focal trait (trait 1): sum only over loci, using a_{1,l}^2.
+    # effects[:,:,0] has shape (L, rep); squaring and multiplying by p*(1-p) keeps shape (L, rep).
+    # Sum over axis=0 collapses loci -> shape (rep,); multiply by 2 (diploid) -> final shape (rep,).
+    return 2*np.sum(effects[:,:,0]**2*p*(1-p), axis=0)
 
 
 #%%
@@ -109,7 +113,7 @@ Ns=np.array([10000])
 Vs=np.array([5,20])
 mus=np.array([6.6e-6])
 thetas=np.array([0e-1])
-a2s=np.array([0.1])
+a2s=np.linspace(0.01, 0.1, 10)  # evenly spaced from 0.01 to 0.1
 all_reps=100 # rep = number of replicate populations simulated in parallel. For MPI splitting.
 n_traits = np.array([1,2,3,5]) # vary dimensionality to show n-D effect
 
@@ -143,7 +147,7 @@ params=[_ for _ in
 
 if rank==0: print(output)
 
-np.savetxt("Vg_sims_n_dimension",np.array(output),header=str(params)) # modify filename
+np.savetxt("Vg_sims_n_dimension_a2_sweep",np.array(output),header=str(params)) # a2 swept 0.01..0.1; row index encodes (L,sigma_e2,N,V_s,mu,a2,theta,n_traits)
 
 # %%
 # 

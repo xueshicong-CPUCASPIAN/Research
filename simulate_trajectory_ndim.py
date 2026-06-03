@@ -51,8 +51,12 @@ def make_cov_matrix(sigma_e2, n_traits, diag_scale, off_sign, off_scale):
 
 # ── trajectory simulation (single replicate, n-D, with cov matrix) ───────────
 def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits, cov_matrix):
-    a = np.sqrt(a2)
-    effects = np.random.normal(0, a, size=(L, n_traits))
+    # Effect scale A ~ Exponential(mean a2), drawn INDEPENDENTLY for each
+    # (locus, trait).  Given A, a_{t,l} ~ Normal(0, A/n_traits) (variance A/n_traits).
+    # => every (locus, trait) has its own size (a_{t,l} marginally Laplace);
+    #    E[a_{t,l}^2]=a2/n_traits and E[||a_l||^2]=a2, independent of n_traits.
+    A = np.random.exponential(a2, size=(L, n_traits))                       # (L, n_traits)
+    effects = np.random.normal(0, 1, size=(L, n_traits)) * np.sqrt(A / n_traits)
     opt = np.zeros(n_traits)
     p   = np.zeros(L)
     maxiter = int(10 * N)
@@ -77,7 +81,8 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits, cov_mat
         delt = opt - zbar
 
         hist[t, :]    = p
-        Vg_hist[t]    = 2 * np.sum(np.sum(effects**2, axis=1) * p * (1 - p)) / n_traits
+        # V_g for the focal trait (trait 1): sum only over loci, using a_{1,l}^2
+        Vg_hist[t]    = 2 * np.sum(effects[:, 0]**2 * p * (1 - p))
         delta_norm[t] = np.linalg.norm(delt)
         delta_1[t]    = delt[0]
 
@@ -86,7 +91,11 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits, cov_mat
         mutation_mask = (np.random.rand(L) < N * mu) & fixed_loci_0
         p[mutation_mask] = 1 / N
         new_idx = np.where(mutation_mask)
-        effects[new_idx[0], :] = np.random.normal(0, a, size=(len(new_idx[0]), n_traits))
+        n_new = len(new_idx[0])
+        # each new mutation: fresh per-(locus,trait) scale A ~ Exp(a2), then N(0, A/n_traits)
+        A_new = np.random.exponential(a2, size=(n_new, n_traits))
+        effects[new_idx[0], :] = (np.random.normal(0, 1, size=(n_new, n_traits))
+                                  * np.sqrt(A_new / n_traits))
 
         # mutation at polymorphic loci
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)
@@ -112,10 +121,12 @@ L        = 100
 N        = 10000
 V_s      = 5
 mu       = 6.6e-6
-a2       = 0.1
 theta    = 0.0
 n_traits = 3
 sigma_e2 = 1e-2
+
+# Sweep over mutational variance a2 evenly from 0.01 to 0.1 (10 values).
+a2_values = np.linspace(0.01, 0.1, 10)
 
 # ── 4 covariance-matrix cases ────────────────────────────────────────────────
 cases = {
@@ -125,25 +136,29 @@ cases = {
     'D': dict(diag_scale='per_trait', off_sign=-1, off_scale='per_trait'),  # diag=σ²/T, off=-σ²/T
 }
 
-# also keep the baseline sigma_e2=0 run for reference (constant optimum)
-print("Running sigma_e2 = 0 (baseline, constant optimum) ...")
-zero_cov = np.zeros((n_traits, n_traits))
-hist0, Vg0, _, _ = simulate_trajectory_nd(L, 0, N, V_s, mu, a2, theta, n_traits, zero_cov)
-np.savetxt('hist_000_nd.txt',    hist0)
-np.savetxt('Vg_hist_000_nd.txt', Vg0)
+for a2 in a2_values:
+    tag = f"a2_{a2:.2f}"
+    print(f"\n############## a2 = {a2:.3f}  ({tag}) ##############")
 
-for label, cfg in cases.items():
-    cov = make_cov_matrix(sigma_e2, n_traits, **cfg)
-    print(f"\nCase {label}: cov matrix =\n{cov}")
-    print(f"Running case {label} ...")
+    # also keep the baseline sigma_e2=0 run for reference (constant optimum)
+    print(f"Running sigma_e2 = 0 (baseline, constant optimum) ...")
+    zero_cov = np.zeros((n_traits, n_traits))
+    hist0, Vg0, _, _ = simulate_trajectory_nd(L, 0, N, V_s, mu, a2, theta, n_traits, zero_cov)
+    np.savetxt(f'hist_000_nd_{tag}.txt',    hist0)
+    np.savetxt(f'Vg_hist_000_nd_{tag}.txt', Vg0)
 
-    hist, Vg, dn, d1 = simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2,
-                                              theta, n_traits, cov)
-    np.savetxt(f'hist_{label}_nd.txt',       hist)
-    np.savetxt(f'Vg_hist_{label}_nd.txt',    Vg)
-    np.savetxt(f'delta_norm_{label}_nd.txt', dn)
-    np.savetxt(f'delta_1_{label}_nd.txt',    d1)
-    print(f"Saved hist_{label}_nd.txt, Vg_hist_{label}_nd.txt, "
-          f"delta_norm_{label}_nd.txt, delta_1_{label}_nd.txt")
+    for label, cfg in cases.items():
+        cov = make_cov_matrix(sigma_e2, n_traits, **cfg)
+        print(f"\nCase {label}: cov matrix =\n{cov}")
+        print(f"Running case {label} ...")
 
-print(f"\nDone (n_traits={n_traits}).  Run figures_ndim.py to plot.")
+        hist, Vg, dn, d1 = simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2,
+                                                  theta, n_traits, cov)
+        np.savetxt(f'hist_{label}_nd_{tag}.txt',       hist)
+        np.savetxt(f'Vg_hist_{label}_nd_{tag}.txt',    Vg)
+        np.savetxt(f'delta_norm_{label}_nd_{tag}.txt', dn)
+        np.savetxt(f'delta_1_{label}_nd_{tag}.txt',    d1)
+        print(f"Saved hist_{label}_nd_{tag}.txt, Vg_hist_{label}_nd_{tag}.txt, "
+              f"delta_norm_{label}_nd_{tag}.txt, delta_1_{label}_nd_{tag}.txt")
+
+print(f"\nDone (n_traits={n_traits}, a2 sweep done).  Run figures_ndim.py to plot.")
