@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 """
 Vectorised sweep over T (number of trait dimensions) for the 4 covariance
-cases.  For each (T, case) pair, simulate `rep` replicate populations in
-parallel (no MPI -- vectorised over numpy arrays) and record the final
-heritability of every replicate.  Saves data and produces a violin plot.
+cases.  THIS IS THE SINGLE SIMULATION SCRIPT: for each (T, case) it runs `rep`
+replicate populations (vectorised over numpy arrays) and saves the per-locus
+final state (a_{1,l}^2 and p_l).  It produces the h^2 violin plot, and the
+saved per-locus data file is also consumed by the histogram scripts
+(sweep_T_4cases_hist.py, hist_a1sq_pq.py, *_summary.py), so the expensive
+30000-generation simulation is run only once.
 
-Output:
-  Vg_sweep_T_4cases.npz   -- arrays of final Vg per (case, T, replicate)
-  violin_T_4cases.pdf     -- violin plot, h^2 vs T, 4 cases side-by-side
+Output (one set per a2 value):
+  hist_T_4cases_data_<tag>.npz  -- per-locus a_{1,l}^2 and p_l (read by hist scripts)
+  Vg_sweep_T_4cases_<tag>.npz   -- final Vg per (case, T, replicate) (derived)
+  violin_T_4cases_<tag>.pdf     -- violin plot, h^2 vs T, 4 cases side-by-side
 """
 
 import numpy as np
@@ -65,7 +69,12 @@ def chol_or_svd(cov):
 
 
 def simulate_vec(T, cov, rep):
-    """Run `rep` replicates in parallel; return final Vg per replicate."""
+    """Run `rep` replicates in parallel; return per-locus (a1_sq, p), each (L, rep).
+
+    a1_sq = focal-trait squared effect a_{1,l}^2.  V_g(trait 1) is recovered as
+    2 * sum_l a1_sq * p (1-p); returning the per-locus arrays (rather than just
+    V_g) also lets the histogram scripts reuse this single simulation run.
+    """
     # Effect scale A ~ Exponential(mean a2): a FIXED per-(locus, trait) property,
     # drawn ONCE as (L, T) and shared across all replicates AND generations.
     # Given A, each effect a_t = sqrt(A/T) * N(0,1); only the normal draw is fresh
@@ -109,9 +118,10 @@ def simulate_vec(T, cov, rep):
         z = np.random.randn(T, rep)
         opt = (1 - theta) * opt + Lchol @ z
 
-    # V_g for the focal trait (trait 1): sum only over loci, using a_{1,l}^2.
-    Vg = 2 * np.sum(effects[:, :, 0]**2 * p * (1 - p), axis=0)
-    return Vg
+    # Return per-locus focal-trait data; V_g is recovered downstream as
+    # 2 * sum_l a1_sq * p (1-p), which also feeds the histogram scripts.
+    a1_sq = effects[:, :, 0] ** 2          # (L, rep): focal-trait squared effect
+    return a1_sq, p
 
 
 # ── main loop ────────────────────────────────────────────────────────────────
@@ -128,23 +138,34 @@ for a2 in a2_values:
 
     # results[case][T_idx] = Vg array of length rep
     results = {label: np.zeros((len(T_list), rep)) for label in cases}
+    # per-locus arrays saved for the histogram scripts (read by sweep_T_4cases_hist.py etc.)
+    save_dict = {'T_list': np.array(T_list)}
 
     for ti, T in enumerate(T_list):
         print(f"\n=== T = {T} ===")
         for label, cfg in cases.items():
             t0 = time.time()
             cov = make_cov_matrix(sigma_e2, T, **cfg)
-            Vg = simulate_vec(T, cov, rep)
+            a1_sq, p = simulate_vec(T, cov, rep)
+            # focal-trait V_g per replicate = 2 * sum_l a_{1,l}^2 p_l(1-p_l)
+            Vg = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
             results[label][ti] = Vg
+            # stash per-locus arrays so the histogram scripts can reuse this run
+            save_dict[f'{label}_T{T}_a1sq'] = a1_sq
+            save_dict[f'{label}_T{T}_p']    = p
             h2 = Vg / (1 + Vg)
             print(f"  Case {label}: mean h² = {h2.mean():.4f}  std = {h2.std():.4f}  "
                   f"[{time.time()-t0:.1f}s]")
 
     # ── save ──────────────────────────────────────────────────────────────────
+    # (1) per-locus data — consumed by sweep_T_4cases_hist.py, hist_a1sq_pq.py, *_summary.py
+    np.savez(f'hist_T_4cases_data_{tag}.npz', **save_dict)
+    print(f"\nSaved hist_T_4cases_data_{tag}.npz")
+    # (2) derived per-replicate Vg (convenience / downstream)
     np.savez(f'Vg_sweep_T_4cases_{tag}.npz',
              T_list=np.array(T_list),
              A=results['A'], B=results['B'], C=results['C'], D=results['D'])
-    print(f"\nSaved Vg_sweep_T_4cases_{tag}.npz")
+    print(f"Saved Vg_sweep_T_4cases_{tag}.npz")
 
     # ── violin plot ──────────────────────────────────────────────────────────
     colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
