@@ -39,12 +39,13 @@ def p_prime_sel_opt(p, delt_opt, effects, V_s):
 
 def simulate(param):
     L,sigma_e2,N,V_s,mu,a2,theta,n_traits,rep=param # add n_traits and rep to param tuple
-    # Effect scale A ~ Exponential(mean a2), drawn INDEPENDENTLY for each
-    # (locus, replicate, trait).  Given A, a_t ~ N(0, A/n_traits) (variance A/n_traits).
-    # => every (locus, trait) has its own size (a_t marginally Laplace);
-    #    E[a_t^2]=a2/n_traits, E[||a||^2]=a2, invariant in n_traits (matches 1D when n_traits=1).
-    A = np.random.exponential(a2, size=(L, rep, n_traits))             # per (locus, rep, trait)
-    effects = np.random.normal(0, 1, size=(L, rep, n_traits)) * np.sqrt(A / n_traits)
+    # Effect scale A ~ Exponential(mean a2): a FIXED per-(locus, trait) property,
+    # drawn ONCE as (L, n_traits) and shared across all replicates AND generations.
+    # Given A, each effect a_t = sqrt(A/n_traits) * N(0,1); only the normal draw is
+    # fresh per mutation, so A is the SAME over rep but differs over locus and trait.
+    # => a_t marginally Laplace; E[a_t^2]=a2/n_traits, E[||a||^2]=a2, invariant in n_traits.
+    A = np.random.exponential(a2, size=(L, n_traits))                 # fixed per (locus, trait)
+    effects = np.random.normal(0, 1, size=(L, rep, n_traits)) * np.sqrt(A / n_traits)[:, None, :]
     opt = np.zeros((n_traits, rep)) # optimum for n traits and rep replicate populations
     p=np.zeros([L,rep]) #frequency of mutant allele at each locus and replicate population
     maxiter=int(10*N)
@@ -70,10 +71,9 @@ def simulate(param):
         np.place(p,mutation_mask,1/N) # replace p = 0 with 1/N
         new_idx = np.where(mutation_mask)  # new_idx[0]=locus, new_idx[1]=replicate
         n_new = len(new_idx[0])
-        # each new mutation: fresh per-trait scale A ~ Exp(a2), then N(0, A/n_traits)
-        A_new = np.random.exponential(a2, size=(n_new, n_traits))
+        # new mutation: reuse the locus's FIXED scale A[locus] (same over rep), fresh N(0,1)
         effects[new_idx[0], new_idx[1], :] = (np.random.normal(0, 1, size=(n_new, n_traits))
-                                              * np.sqrt(A_new / n_traits))
+                                              * np.sqrt(A[new_idx[0], :] / n_traits))
 
         # generate #np.sum(mutation_mask) random integers whose values are 0 or 1
         # np.sum(mutation_mask) is the number of new mutations.

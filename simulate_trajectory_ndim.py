@@ -51,11 +51,13 @@ def make_cov_matrix(sigma_e2, n_traits, diag_scale, off_sign, off_scale):
 
 # ── trajectory simulation (single replicate, n-D, with cov matrix) ───────────
 def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits, cov_matrix):
-    # Effect scale A ~ Exponential(mean a2), drawn INDEPENDENTLY for each
-    # (locus, trait).  Given A, a_{t,l} ~ Normal(0, A/n_traits) (variance A/n_traits).
-    # => every (locus, trait) has its own size (a_{t,l} marginally Laplace);
+    # Effect scale A ~ Exponential(mean a2): a FIXED per-(locus, trait) property,
+    # drawn ONCE as (L, n_traits) and reused for every mutation at that locus
+    # (single replicate here, so "same over rep" is automatic).  Given A, each
+    # effect a_{t,l} = sqrt(A/n_traits) * N(0,1); only the normal draw is fresh
+    # per mutation.  => differs over locus and trait; a_{t,l} marginally Laplace;
     #    E[a_{t,l}^2]=a2/n_traits and E[||a_l||^2]=a2, independent of n_traits.
-    A = np.random.exponential(a2, size=(L, n_traits))                       # (L, n_traits)
+    A = np.random.exponential(a2, size=(L, n_traits))                       # fixed per (locus, trait)
     effects = np.random.normal(0, 1, size=(L, n_traits)) * np.sqrt(A / n_traits)
     opt = np.zeros(n_traits)
     p   = np.zeros(L)
@@ -92,10 +94,9 @@ def simulate_trajectory_nd(L, sigma_e2, N, V_s, mu, a2, theta, n_traits, cov_mat
         p[mutation_mask] = 1 / N
         new_idx = np.where(mutation_mask)
         n_new = len(new_idx[0])
-        # each new mutation: fresh per-(locus,trait) scale A ~ Exp(a2), then N(0, A/n_traits)
-        A_new = np.random.exponential(a2, size=(n_new, n_traits))
+        # new mutation: reuse the locus's FIXED scale A[locus]; only N(0,1) is fresh
         effects[new_idx[0], :] = (np.random.normal(0, 1, size=(n_new, n_traits))
-                                  * np.sqrt(A_new / n_traits))
+                                  * np.sqrt(A[new_idx[0], :] / n_traits))
 
         # mutation at polymorphic loci
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)
