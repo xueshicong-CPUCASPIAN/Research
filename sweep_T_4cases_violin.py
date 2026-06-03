@@ -19,12 +19,14 @@ L         = 100
 N         = 10000
 V_s       = 5
 mu        = 6.6e-6
-a2        = 0.01
 theta     = 0.0
 sigma_e2  = 1e-3
 maxiter   = 30000
 rep       = 100            # replicates per (T, case)
 T_list    = [1, 2, 3, 5, 10, 20, 50, 100]
+# Sweep over mutational variance a2 evenly from 0.01 to 0.1 (10 values).
+a2_values = np.linspace(0.01, 0.1, 10)
+a2 = a2_values[0]          # current value (overwritten inside the sweep loop below)
 
 # ── simulation core (vectorised over replicates, like the MPI version) ───────
 def pmap(rho):  return rho / (1 + rho)
@@ -64,10 +66,12 @@ def chol_or_svd(cov):
 
 def simulate_vec(T, cov, rep):
     """Run `rep` replicates in parallel; return final Vg per replicate."""
-    # Per-component std: each a_i ~ N(0, a2/T), so E[||a||^2] = a2 regardless of T.
-    # Keeps total squared mutational size invariant in T (matches 1D when T=1).
-    a_per_dim = np.sqrt(a2 / T)
-    effects = np.random.normal(0, a_per_dim, size=(L, rep, T))
+    # Effect scale A ~ Exponential(mean a2), drawn INDEPENDENTLY for each
+    # (locus, replicate, trait).  Given A, a_t ~ N(0, A/T) (variance A/T).
+    # => every (locus, trait) has its own size (a_t marginally Laplace);
+    #    E[a_t^2]=a2/T, E[||a||^2]=a2, invariant in T (matches 1D when T=1).
+    A = np.random.exponential(a2, size=(L, rep, T))
+    effects = np.random.normal(0, 1, size=(L, rep, T)) * np.sqrt(A / T)
     opt = np.zeros((T, rep))
     p   = np.zeros((L, rep))
     Lchol = chol_or_svd(cov)
@@ -85,7 +89,11 @@ def simulate_vec(T, cov, rep):
         mutation_mask = (np.random.rand(L, rep) < N * mu) & fixed_loci_0
         np.place(p, mutation_mask, 1 / N)
         idx = np.where(mutation_mask)
-        effects[idx[0], idx[1], :] = np.random.normal(0, a_per_dim, size=(len(idx[0]), T))
+        n_new = len(idx[0])
+        # each new mutation: fresh per-trait scale A ~ Exp(a2), then N(0, A/T)
+        A_new = np.random.exponential(a2, size=(n_new, T))
+        effects[idx[0], idx[1], :] = (np.random.normal(0, 1, size=(n_new, T))
+                                      * np.sqrt(A_new / T))
 
         # mutation at polymorphic loci
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)
@@ -101,9 +109,8 @@ def simulate_vec(T, cov, rep):
         z = np.random.randn(T, rep)
         opt = (1 - theta) * opt + Lchol @ z
 
-    # No /T here: effects are already drawn with per-component variance a2/T,
-    # so sum_t effects**2 ~ a2 per locus on average, and Vg is on the same scale as the 1D case.
-    Vg = 2 * np.sum(np.sum(effects**2, axis=2) * p * (1 - p), axis=0)
+    # V_g for the focal trait (trait 1): sum only over loci, using a_{1,l}^2.
+    Vg = 2 * np.sum(effects[:, :, 0]**2 * p * (1 - p), axis=0)
     return Vg
 
 
@@ -115,71 +122,86 @@ cases = {
     'D': dict(diag_scale='per_trait', off_sign=-1, off_scale='per_trait'),
 }
 
-# results[case][T_idx] = Vg array of length rep
-results = {label: np.zeros((len(T_list), rep)) for label in cases}
+for a2 in a2_values:
+    tag = f"a2_{a2:.2f}"
+    print(f"\n############## a2 = {a2:.3f}  ({tag}) ##############")
 
-for ti, T in enumerate(T_list):
-    print(f"\n=== T = {T} ===")
-    for label, cfg in cases.items():
-        t0 = time.time()
-        cov = make_cov_matrix(sigma_e2, T, **cfg)
-        Vg = simulate_vec(T, cov, rep)
-        results[label][ti] = Vg
-        h2 = Vg / (1 + Vg)
-        print(f"  Case {label}: mean h² = {h2.mean():.4f}  std = {h2.std():.4f}  "
-              f"[{time.time()-t0:.1f}s]")
+    # results[case][T_idx] = Vg array of length rep
+    results = {label: np.zeros((len(T_list), rep)) for label in cases}
 
-# ── save ──────────────────────────────────────────────────────────────────────
-np.savez('Vg_sweep_T_4cases.npz',
-         T_list=np.array(T_list),
-         A=results['A'], B=results['B'], C=results['C'], D=results['D'])
-print("\nSaved Vg_sweep_T_4cases.npz")
-
-# ── violin plot ───────────────────────────────────────────────────────────────
-colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
-labels = {
-    'A': r'A: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=+\sigma^2$',
-    'B': r'B: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=-\sigma^2$',
-    'C': r'C: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=+\sigma^2/T$',
-    'D': r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
-}
-
-fig, ax = plt.subplots(figsize=[12, 5])
-
-n_cases = 4
-displ   = np.linspace(-0.30, 0.30, n_cases)   # spread per case at each T
-width   = 0.18
-
-for ci, label in enumerate(['A', 'B', 'C', 'D']):
     for ti, T in enumerate(T_list):
-        Vg = results[label][ti]
-        h2 = Vg / (1 + Vg)
-        x  = np.log10(T) * 4 + displ[ci]   # spread on a log-T axis
-        parts = ax.violinplot(h2, positions=[x], widths=width, showmeans=True)
-        for pc in parts['bodies']:
-            pc.set_color(colors[label])
-            pc.set_alpha(0.55)
-        for k in ('cbars', 'cmins', 'cmaxes', 'cmeans'):
-            parts[k].set_color(colors[label])
+        print(f"\n=== T = {T} ===")
+        for label, cfg in cases.items():
+            t0 = time.time()
+            cov = make_cov_matrix(sigma_e2, T, **cfg)
+            Vg = simulate_vec(T, cov, rep)
+            results[label][ti] = Vg
+            h2 = Vg / (1 + Vg)
+            print(f"  Case {label}: mean h² = {h2.mean():.4f}  std = {h2.std():.4f}  "
+                  f"[{time.time()-t0:.1f}s]")
 
-# legend
-handles = [plt.matplotlib.patches.Patch(color=colors[c], alpha=0.7,
-                                        label=labels[c]) for c in cases]
-ax.legend(handles=handles, fontsize=9, loc='upper left')
+    # ── save ──────────────────────────────────────────────────────────────────
+    np.savez(f'Vg_sweep_T_4cases_{tag}.npz',
+             T_list=np.array(T_list),
+             A=results['A'], B=results['B'], C=results['C'], D=results['D'])
+    print(f"\nSaved Vg_sweep_T_4cases_{tag}.npz")
 
-# ticks at T positions
-xticks = [np.log10(T) * 4 for T in T_list]
-ax.set_xticks(xticks)
-ax.set_xticklabels([str(T) for T in T_list])
+    # ── violin plot ──────────────────────────────────────────────────────────
+    colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
+    labels = {
+        'A': r'A: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=+\sigma^2$',
+        'B': r'B: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=-\sigma^2$',
+        'C': r'C: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=+\sigma^2/T$',
+        'D': r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
+    }
 
-ax.set_xlabel('Number of trait dimensions $T$', fontsize=12)
-ax.set_ylabel(r'Heritability $h^2$', fontsize=12)
-ax.set_title(r'Violin plot of $h^2$ across replicates ' +
-             f'(rep={rep}, $\\sigma^2=10^{{-2}}$, $V_s=5$, $N=10^4$, $L=100$)',
-             fontsize=11)
-ax.set_ylim([0, 1])
-ax.grid(True, axis='y', alpha=0.3)
+    fig, ax = plt.subplots(figsize=[14, 7])
 
-plt.tight_layout()
-plt.savefig('violin_T_4cases_a_0.01.pdf', bbox_inches='tight')
-print("Saved violin_T_4cases_a_0.01.pdf")
+    n_cases = 4
+    # wider x-axis units (×8 instead of ×4) → more room per T group → fatter violins
+    x_scale = 8.0
+    displ   = np.linspace(-0.60, 0.60, n_cases)   # spread per case at each T
+    width   = 0.45
+
+    # compute y-range from the data so violins fill the panel
+    all_h2 = np.concatenate([
+        (results[c] / (1 + results[c])).ravel() for c in ['A', 'B', 'C', 'D']
+    ])
+    y_lo = max(0.0, all_h2.min() - 0.01)
+    y_hi = all_h2.max() + 0.01
+
+    for ci, label in enumerate(['A', 'B', 'C', 'D']):
+        for ti, T in enumerate(T_list):
+            Vg = results[label][ti]
+            h2 = Vg / (1 + Vg)
+            x  = np.log10(T) * x_scale + displ[ci]   # spread on a log-T axis
+            parts = ax.violinplot(h2, positions=[x], widths=width, showmeans=True)
+            for pc in parts['bodies']:
+                pc.set_color(colors[label])
+                pc.set_alpha(0.55)
+            for k in ('cbars', 'cmins', 'cmaxes', 'cmeans'):
+                parts[k].set_color(colors[label])
+
+    # legend
+    handles = [plt.matplotlib.patches.Patch(color=colors[c], alpha=0.7,
+                                            label=labels[c]) for c in cases]
+    ax.legend(handles=handles, fontsize=11, loc='upper left')
+
+    # ticks at T positions
+    xticks = [np.log10(T) * x_scale for T in T_list]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels([str(T) for T in T_list], fontsize=11)
+    ax.tick_params(axis='y', labelsize=11)
+
+    ax.set_xlabel('Number of trait dimensions $T$', fontsize=13)
+    ax.set_ylabel(r'Heritability $h^2$', fontsize=13)
+    ax.set_title(r'Violin plot of $h^2$ across replicates ' +
+                 f'(rep={rep}, $a^2={a2:.2f}$, $\\sigma^2=10^{{-3}}$, $V_s=5$, $N=10^4$, $L=100$)',
+                 fontsize=12)
+    ax.set_ylim([y_lo, y_hi])
+    ax.grid(True, axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(f'violin_T_4cases_{tag}.pdf', bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved violin_T_4cases_{tag}.pdf")
