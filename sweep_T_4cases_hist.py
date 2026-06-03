@@ -68,12 +68,13 @@ def simulate_vec(T, cov, rep):
 
     a1_sq, p_final both have shape (L, rep).
     """
-    # Effect scale A ~ Exponential(mean a2), drawn INDEPENDENTLY for each
-    # (locus, replicate, trait).  Given A, a_t ~ N(0, A/T) (variance A/T).
-    # => every (locus, trait) has its own size (a_t marginally Laplace);
-    #    E[a_t^2]=a2/T, E[||a||^2]=a2.
-    A = np.random.exponential(a2, size=(L, rep, T))
-    effects = np.random.normal(0, 1, size=(L, rep, T)) * np.sqrt(A / T)
+    # Effect scale A ~ Exponential(mean a2): a FIXED per-(locus, trait) property,
+    # drawn ONCE as (L, T) and shared across all replicates AND generations.
+    # Given A, each effect a_t = sqrt(A/T) * N(0,1); only the normal draw is fresh
+    # per mutation, so A is the SAME over rep but differs over locus and trait.
+    # => a_t marginally Laplace; E[a_t^2]=a2/T, E[||a||^2]=a2.
+    A = np.random.exponential(a2, size=(L, T))                  # fixed per (locus, trait)
+    effects = np.random.normal(0, 1, size=(L, rep, T)) * np.sqrt(A / T)[:, None, :]
     opt = np.zeros((T, rep))
     p   = np.zeros((L, rep))
     Lchol = chol_or_svd(cov)
@@ -91,10 +92,9 @@ def simulate_vec(T, cov, rep):
         np.place(p, mutation_mask, 1 / N)
         idx = np.where(mutation_mask)
         n_new = len(idx[0])
-        # each new mutation: fresh per-trait scale A ~ Exp(a2), then N(0, A/T)
-        A_new = np.random.exponential(a2, size=(n_new, T))
+        # new mutation: reuse the locus's FIXED scale A[locus] (same over rep), fresh N(0,1)
         effects[idx[0], idx[1], :] = (np.random.normal(0, 1, size=(n_new, T))
-                                      * np.sqrt(A_new / T))
+                                      * np.sqrt(A[idx[0], :] / T))
 
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)
         p[poly_loci] += (
