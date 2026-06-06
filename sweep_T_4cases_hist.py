@@ -22,8 +22,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Sweep over mutational variance a2 evenly from 0.01 to 0.1 (10 values).
-a2_values = np.linspace(0.01, 0.1, 10)
+# a2 values swept: 0.01, 0.03, 0.1
+a2_values = np.array([0.01, 0.03, 0.1])
 
 colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
 case_titles = {

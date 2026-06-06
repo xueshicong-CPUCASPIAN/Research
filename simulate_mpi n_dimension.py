@@ -113,9 +113,9 @@ Ns=np.array([10000])
 Vs=np.array([5,20])
 mus=np.array([6.6e-6])
 thetas=np.array([0e-1])
-a2s=np.linspace(0.01, 0.1, 10)  # evenly spaced from 0.01 to 0.1
+a2s=np.array([0.01, 0.03, 0.1])  # a2 values swept
 all_reps=100 # rep = number of replicate populations simulated in parallel. For MPI splitting.
-n_traits = np.array([1,2,3,5]) # vary dimensionality to show n-D effect
+n_traits = np.array([1, 5, 20, 100]) # vary dimensionality to show n-D effect
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()

@@ -126,8 +126,8 @@ theta    = 0.0
 n_traits = 3
 sigma_e2 = 1e-2
 
-# Sweep over mutational variance a2 evenly from 0.01 to 0.1 (10 values).
-a2_values = np.linspace(0.01, 0.1, 10)
+# a2 values swept: 0.01, 0.03, 0.1
+a2_values = np.array([0.01, 0.03, 0.1])
 
 # ── 4 covariance-matrix cases ────────────────────────────────────────────────
 cases = {
