@@ -27,9 +27,9 @@ theta     = 0.0
 sigma_e2  = 1e-3
 maxiter   = 30000
 rep       = 100            # replicates per (T, case)
-T_list    = [1, 2, 3, 5, 10, 20, 50, 100]
-# Sweep over mutational variance a2 evenly from 0.01 to 0.1 (10 values).
-a2_values = np.linspace(0.01, 0.1, 10)
+T_list    = [1, 5, 20, 100]
+# a2 values swept: 0.01, 0.03, 0.1
+a2_values = np.array([0.01, 0.03, 0.1])
 a2 = a2_values[0]          # current value (overwritten inside the sweep loop below)
 
 # ── simulation core (vectorised over replicates, like the MPI version) ───────
@@ -75,13 +75,13 @@ def simulate_vec(T, cov, rep):
     2 * sum_l a1_sq * p (1-p); returning the per-locus arrays (rather than just
     V_g) also lets the histogram scripts reuse this single simulation run.
     """
-    # Effect scale A ~ Exponential(mean a2): a FIXED per-(locus, trait) property,
-    # drawn ONCE as (L, T) and shared across all replicates AND generations.
+    # Effect scale A ~ Exponential(mean a2): a FIXED per-(locus, replicate) property,
+    # drawn ONCE as (L, rep) and shared across all traits AND generations.
     # Given A, each effect a_t = sqrt(A/T) * N(0,1); only the normal draw is fresh
-    # per mutation, so A is the SAME over rep but differs over locus and trait.
+    # per mutation, so A is the SAME over trait but differs over locus and replicate.
     # => a_t marginally Laplace; E[a_t^2]=a2/T, E[||a||^2]=a2, invariant in T.
-    A = np.random.exponential(a2, size=(L, T))                  # fixed per (locus, trait)
-    effects = np.random.normal(0, 1, size=(L, rep, T)) * np.sqrt(A / T)[:, None, :]
+    A = np.random.exponential(a2, size=(L, rep))                # fixed per (locus, replicate)
+    effects = np.random.normal(0, 1, size=(L, rep, T)) * np.sqrt(A / T)[:, :, None]
     opt = np.zeros((T, rep))
     p   = np.zeros((L, rep))
     Lchol = chol_or_svd(cov)
@@ -100,9 +100,9 @@ def simulate_vec(T, cov, rep):
         np.place(p, mutation_mask, 1 / N)
         idx = np.where(mutation_mask)
         n_new = len(idx[0])
-        # new mutation: reuse the locus's FIXED scale A[locus] (same over rep), fresh N(0,1)
+        # new mutation: reuse the (locus, replicate) FIXED scale A (same over trait), fresh N(0,1)
         effects[idx[0], idx[1], :] = (np.random.normal(0, 1, size=(n_new, T))
-                                      * np.sqrt(A[idx[0], :] / T))
+                                      * np.sqrt(A[idx[0], idx[1]] / T)[:, None])
 
         # mutation at polymorphic loci
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)

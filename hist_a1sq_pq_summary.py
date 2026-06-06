@@ -10,7 +10,7 @@ into summary statistics plotted against T for the 4 cases:
   (1) E[a_{1,l}^2 * p_l (1-p_l)]      -- per-locus contribution to V_g(trait 1)
   (2) sum_l a_{1,l}^2 * p_l (1-p_l)   -- per-replicate total (V_g, trait 1, /2)
 
-Sweeps a2 over np.linspace(0.01, 0.1, 10).
+Sweeps a2 over [0.01, 0.03, 0.1].
 
 Output (one per a2 value):
   hist_a1sq_pq_summary_a2_<value>.pdf
@@ -20,8 +20,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Sweep over mutational variance a2 evenly from 0.01 to 0.1 (10 values).
-a2_values = np.linspace(0.01, 0.1, 10)
+# a2 values swept: 0.01, 0.03, 0.1
+a2_values = np.array([0.01, 0.03, 0.1])
 
 cases  = ['A', 'B', 'C', 'D']
 colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}

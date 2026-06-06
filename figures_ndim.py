@@ -47,8 +47,8 @@ print("Plotting Figure 1 (4-case time series)...")
 
 import os
 
-# Sweep over mutational variance a2 evenly from 0.01 to 0.1 (10 values).
-a2_values = np.linspace(0.01, 0.1, 10)
+# a2 values swept: 0.01, 0.03, 0.1
+a2_values = np.array([0.01, 0.03, 0.1])
 
 # Case descriptions for column titles
 case_titles = {
