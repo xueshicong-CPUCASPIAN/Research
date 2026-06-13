@@ -75,13 +75,15 @@ def simulate_vec(T, cov, rep):
     2 * sum_l a1_sq * p (1-p); returning the per-locus arrays (rather than just
     V_g) also lets the histogram scripts reuse this single simulation run.
     """
-    # Effect scale A ~ Exponential(mean a2): a FIXED per-(locus, replicate) property,
-    # drawn ONCE as (L, rep) and shared across all traits AND generations.
-    # Given A, each effect a_t = sqrt(A/T) * N(0,1); only the normal draw is fresh
-    # per mutation, so A is the SAME over trait but differs over locus and replicate.
+    # Effect scale A ~ Exponential(mean a2): drawn FRESH for EVERY new mutation (inside
+    # the generation loop below), so A differs over locus, replicate AND mutation/
+    # generation, while staying the SAME across the T traits of a given mutation.
+    # Given A, each trait effect is a_t = sqrt(A/T) * N(0,1) -- both A and the N(0,1)
+    # draw are fresh per mutation.
     # => a_t marginally Laplace; E[a_t^2]=a2/T, E[||a||^2]=a2, invariant in T.
-    A = np.random.exponential(a2, size=(L, rep))                # fixed per (locus, replicate)
-    effects = np.random.normal(0, 1, size=(L, rep, T)) * np.sqrt(A / T)[:, :, None]
+    # effects starts empty (population monomorphic, p=0); each mutation fills its own
+    # (locus, rep) row with a freshly drawn A.
+    effects = np.zeros((L, rep, T))
     opt = np.zeros((T, rep))
     p   = np.zeros((L, rep))
     Lchol = chol_or_svd(cov)
@@ -100,9 +102,12 @@ def simulate_vec(T, cov, rep):
         np.place(p, mutation_mask, 1 / N)
         idx = np.where(mutation_mask)
         n_new = len(idx[0])
-        # new mutation: reuse the (locus, replicate) FIXED scale A (same over trait), fresh N(0,1)
+        # new mutation: draw a FRESH scale A ~ Exp(a2) per mutation (one per locus*rep
+        # event, SAME across traits) plus a fresh N(0,1) direction.  A thus differs over
+        # locus, replicate, and generation.
+        A_new = np.random.exponential(a2, size=n_new)           # (n_new,): one fresh scale per mutation
         effects[idx[0], idx[1], :] = (np.random.normal(0, 1, size=(n_new, T))
-                                      * np.sqrt(A[idx[0], idx[1]] / T)[:, None])
+                                      * np.sqrt(A_new / T)[:, None])
 
         # mutation at polymorphic loci
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)
