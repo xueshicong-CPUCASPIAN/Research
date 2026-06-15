@@ -16,6 +16,7 @@ Output (one set per a2 value):
 
 import numpy as np
 import matplotlib.pyplot as plt
+import itertools
 import time
 
 # ── parameters ────────────────────────────────────────────────────────────────
@@ -28,9 +29,43 @@ sigma_e2  = 1e-3
 maxiter   = 30000
 rep       = 100            # replicates per (T, case)
 T_list    = [1, 5, 20, 100]
-# a2 values swept: 0.01, 0.03, 0.1
-a2_values = np.array([0.01, 0.03, 0.1])
+# a2 (mean effect size) swept; currently a single value
+a2_values = np.array([0.03])
 a2 = a2_values[0]          # current value (overwritten inside the sweep loop below)
+
+# ── distributions for the per-mutation effect scale A ───────────────────────────
+# Each draw_A(a2, T, n) returns n freshly drawn scales A (one per mutation event).
+# Given A, each trait effect is a_t = sqrt(A/T) * N(0,1), so A = E[||a||^2 | A].
+#   exp/const/gamma/lognormal all have mean a2 -> E[||a||^2]=a2 invariant in T.
+#   twopoint is the user-specified PMF and is NOT mean-a2 / NOT T-invariant:
+#   E[A] = (a2/T)(2 - 1/T) -> shrinks toward 0 as T grows.
+def draw_exp(a2, T, n):    return np.random.exponential(a2, size=n)        # mean a2
+def draw_const(a2, T, n):  return np.full(n, a2)                          # mean a2 (no variance)
+def draw_gamma(a2, T, n):                                                 # mean a2, shape k
+    k = 2.0
+    return np.random.gamma(k, a2 / k, size=n)
+def draw_lognormal(a2, T, n):                                             # mean a2
+    s = 1.0
+    return np.random.lognormal(np.log(a2) - 0.5 * s**2, s, size=n)
+def draw_twopoint(a2, T, n):                                              # a2 w.p. 1/T else a2/T
+    return np.where(np.random.rand(n) < 1.0 / T, a2, a2 / T)
+
+dists = {
+    'twopoint':  draw_twopoint,
+    'exp':       draw_exp,
+    'const':     draw_const,
+    'gamma':     draw_gamma,
+    'lognormal': draw_lognormal,
+}
+
+# ── per-trait effect scaling a_t ~ N(0, A / T**p) ───────────────────────────────
+# p controls how each trait effect shrinks with the number of dimensions T.
+#   aT1   (p=1)   : a_t ~ N(0, A/T)        -> E[||a||^2]=E[A]   (T-invariant)
+#   aTsqrt(p=0.5) : a_t ~ N(0, A/sqrt(T))  -> E[||a||^2]=E[A]*sqrt(T) (grows with T)
+a1_scalings = {
+    'aT1':    1.0,
+    'aTsqrt': 0.5,
+}
 
 # ── simulation core (vectorised over replicates, like the MPI version) ───────
 def pmap(rho):  return rho / (1 + rho)
@@ -68,7 +103,7 @@ def chol_or_svd(cov):
         return eigvecs @ np.diag(np.sqrt(eigvals))
 
 
-def simulate_vec(T, cov, rep):
+def simulate_vec(T, cov, rep, draw_A, texp):
     """Run `rep` replicates in parallel; return per-locus (a1_sq, p), each (L, rep).
 
     a1_sq = focal-trait squared effect a_{1,l}^2.  V_g(trait 1) is recovered as
@@ -105,9 +140,9 @@ def simulate_vec(T, cov, rep):
         # new mutation: draw a FRESH scale A ~ Exp(a2) per mutation (one per locus*rep
         # event, SAME across traits) plus a fresh N(0,1) direction.  A thus differs over
         # locus, replicate, and generation.
-        A_new = np.random.exponential(a2, size=n_new)           # (n_new,): one fresh scale per mutation
+        A_new = draw_A(a2, T, n_new)                            # (n_new,): one fresh scale per mutation
         effects[idx[0], idx[1], :] = (np.random.normal(0, 1, size=(n_new, T))
-                                      * np.sqrt(A_new / T)[:, None])
+                                      * np.sqrt(A_new / T**texp)[:, None])
 
         # mutation at polymorphic loci
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)
@@ -137,9 +172,10 @@ cases = {
     'D': dict(diag_scale='per_trait', off_sign=-1, off_scale='per_trait'),
 }
 
-for a2 in a2_values:
-    tag = f"a2_{a2:.2f}"
-    print(f"\n############## a2 = {a2:.3f}  ({tag}) ##############")
+for (dist_name, draw_A), (a1_name, texp), a2 in itertools.product(
+        dists.items(), a1_scalings.items(), a2_values):
+    tag = f"{dist_name}_{a1_name}_a2_{a2:.2f}"
+    print(f"\n############## dist = {dist_name}  a1 = {a1_name}  a2 = {a2:.3f}  ({tag}) ##############")
 
     # results[case][T_idx] = Vg array of length rep
     results = {label: np.zeros((len(T_list), rep)) for label in cases}
@@ -151,7 +187,7 @@ for a2 in a2_values:
         for label, cfg in cases.items():
             t0 = time.time()
             cov = make_cov_matrix(sigma_e2, T, **cfg)
-            a1_sq, p = simulate_vec(T, cov, rep)
+            a1_sq, p = simulate_vec(T, cov, rep, draw_A, texp)
             # focal-trait V_g per replicate = 2 * sum_l a_{1,l}^2 p_l(1-p_l)
             Vg = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
             results[label][ti] = Vg
@@ -222,7 +258,7 @@ for a2 in a2_values:
     ax.set_xlabel('Number of trait dimensions $T$', fontsize=13)
     ax.set_ylabel(r'Heritability $h^2$', fontsize=13)
     ax.set_title(r'Violin plot of $h^2$ across replicates ' +
-                 f'(rep={rep}, $a^2={a2:.2f}$, $\\sigma^2=10^{{-3}}$, $V_s=5$, $N=10^4$, $L=100$)',
+                 f'(A~{dist_name}, $a_t$~{a1_name}, rep={rep}, $a^2={a2:.2f}$, $\\sigma^2=10^{{-3}}$, $V_s=5$, $N=10^4$, $L=100$)',
                  fontsize=12)
     ax.set_ylim([y_lo, y_hi])
     ax.grid(True, axis='y', alpha=0.3)

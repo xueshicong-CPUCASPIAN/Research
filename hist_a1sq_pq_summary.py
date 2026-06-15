@@ -17,11 +17,16 @@ Output (one per a2 value):
 """
 
 import os
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
-# a2 values swept: 0.01, 0.03, 0.1
-a2_values = np.array([0.01, 0.03, 0.1])
+# a2 (mean effect size) swept; currently a single value
+a2_values = np.array([0.03])
+# A-scale distributions produced by sweep_T_4cases_violin.py (must match its `dists` keys)
+dist_names = ['twopoint', 'exp', 'const', 'gamma', 'lognormal']
+# per-trait scaling a_t ~ N(0, A / T**p) (must match violin's `a1_scalings`); name -> p
+a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
 
 cases  = ['A', 'B', 'C', 'D']
 colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
@@ -32,16 +37,17 @@ labels = {
     'D': r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
 }
 
-for a2 in a2_values:
-    tag = f"a2_{a2:.2f}"
+for dist_name, (a1_name, texp), a2 in itertools.product(
+        dist_names, a1_scalings.items(), a2_values):
+    tag = f"{dist_name}_{a1_name}_a2_{a2:.2f}"
     DATA_FILE = f'hist_T_4cases_data_{tag}.npz'
 
     if not os.path.exists(DATA_FILE):
-        print(f"[skip] {DATA_FILE} not found. Run sweep_T_4cases_hist.py first "
-              "to generate the per-locus data for this a2.")
+        print(f"[skip] {DATA_FILE} not found. Run sweep_T_4cases_violin.py first "
+              "to generate the per-locus data for this (dist, a1, a2).")
         continue
 
-    print(f"\n############## {DATA_FILE}  (a2 = {a2:.3f}) ##############")
+    print(f"\n############## {DATA_FILE}  (dist = {dist_name}, a1 = {a1_name}, a2 = {a2:.3f}) ##############")
     d = np.load(DATA_FILE)
     T_list = d['T_list']
 
@@ -80,7 +86,7 @@ for a2 in a2_values:
     ax.set_xlabel(r'$T$')
     ax.set_ylabel(r'$E\!\left[a_{1,l}^2\, p_l (1-p_l)\right]$')
     ax.set_title(rf'(1)  per-locus $E[a_{{1,l}}^2\, p_l(1-p_l)]$  vs $T$   '
-                 rf'($a^2={a2:.2f}$)')
+                 rf'($a^2={a2:.2f}$, $a_t$~{a1_name})')
     ax.grid(True, which='both', alpha=0.3)
     ax.legend(fontsize=7, loc='best')
 
@@ -93,7 +99,7 @@ for a2 in a2_values:
     ax.set_xlabel(r'$T$')
     ax.set_ylabel(r'$\sum_l a_{1,l}^2\, p_l (1-p_l)$')
     ax.set_title(rf'(2)  per-replicate $\sum_l a_{{1,l}}^2 p_l(1-p_l)$  vs $T$   '
-                 rf'($a^2={a2:.2f}$)' '\n($V_g$(trait 1)$/2$)')
+                 rf'($a^2={a2:.2f}$, $a_t$~{a1_name})' '\n($V_g$(trait 1)$/2$)')
     ax.grid(True, which='both', alpha=0.3)
 
     plt.tight_layout()
