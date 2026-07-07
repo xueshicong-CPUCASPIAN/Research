@@ -5,14 +5,20 @@ for the 4 covariance cases A, B, C, D and each T in T_list.
 
 c_l is the per-locus contribution to the additive genetic variance of trait 1
 (V_g(trait 1) = 2 * sum_l c_l).  For each replicate the L loci are sorted in
-DECREASING order, giving a length-L curve (rank 1 = largest contributor); these
-curves are then averaged across replicates at each rank.  The result shows the
-SHAPE of the decay -- whether a few loci dominate V_g (steep) or the contribution
-is spread evenly across loci (shallow).  A shaded band shows the 25-75% spread
-across replicates at each rank.
+DECREASING order, giving a length-L curve (rank 1 = largest contributor).  At each
+rank we summarise across replicates with BOTH the MEDIAN (solid) and the MEAN
+(dashed), plus a 25-75% band.  The median sits in the middle of its band; the mean
+rides above it because the across-replicate distribution is right-skewed (a few
+runs keep a locus strongly polymorphic).  The mean is the V_g-additive summary
+(E[V_g]=2*sum_l mean_l).  The curve shows the SHAPE of the decay -- whether a few
+loci dominate V_g (steep) or it is spread evenly (shallow).
+
+The static-optimum (sigma^2 = 0) baseline is overlaid in black dashes so the
+fluctuating cases A-D can be compared against it rank-by-rank.
 
 Reuses the per-locus data produced by sweep_T_4cases_violin.py
-(hist_T_4cases_data_<tag>.npz), so no simulation is run here.
+(hist_T_4cases_data_<tag>.npz for A-D, hist_baseline_sigma0_<a2>.npz for the
+sigma^2 = 0 baseline), so no simulation is run here.
 
 Output (one per (dist, a1, a2)):
     rank_a1sq_pq_4cases_<tag>.pdf   -- one panel per T, 4 cases overlaid, log-y
@@ -22,11 +28,12 @@ import os
 import itertools
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 # a2 (mean effect size) swept; currently a single value
 a2_values = np.array([0.03])
 # A-scale distributions produced by sweep_T_4cases_violin.py (must match its `dists` keys)
-dist_names = ['twopoint', 'exp', 'const', 'gamma', 'lognormal']
+dist_names = ['const']  # complex A-scale dists disabled: 'twopoint', 'exp', 'gamma', 'lognormal'
 # per-trait scaling a_t ~ N(0, A / T**p) (must match violin's `a1_scalings`); name -> p
 a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
 
@@ -53,6 +60,24 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
     npz = np.load(DATA_FILE)
     T_list = list(npz['T_list'])
 
+    # σ²=0 static baseline (same a1-scaling, cases coincide) for overlay, if present
+    BASE_FILE = f'hist_baseline_sigma0_a2_{a2:.2f}.npz'
+    base_npz = np.load(BASE_FILE) if os.path.exists(BASE_FILE) else None
+    if base_npz is None:
+        print(f"[note] {BASE_FILE} not found; σ²=0 baseline not overlaid.")
+
+    def rank_summary(a1_sq, p):
+        """Sort per-locus c=a1²·p(1-p) descending per replicate; return ranks and,
+        across replicates at each rank: median, mean, and the 25/75% band."""
+        c = a1_sq * p * (1 - p)                   # (L, rep)
+        c_sorted = -np.sort(-c, axis=0)           # (L, rep), rank 0 = largest
+        ranks = np.arange(1, c_sorted.shape[0] + 1)
+        med  = np.quantile(c_sorted, 0.50, axis=1)  # median -> middle of the band
+        mean = c_sorted.mean(axis=1)                # mean -> V_g-additive, above median
+        lo   = np.quantile(c_sorted, 0.25, axis=1)
+        hi   = np.quantile(c_sorted, 0.75, axis=1)
+        return ranks, med, mean, lo, hi
+
     # ── one figure per (dist, a1, a2); one panel per T ─────────────────────────
     n = len(T_list)
     ncol = 2
@@ -63,22 +88,23 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
 
     for pi, T in enumerate(T_list):
         ax = axes_flat[pi]
+        # colour = case (black = σ²=0 baseline); solid = median, dashed = mean.
         for label in cases:
-            a1_sq = npz[f'{label}_T{T}_a1sq']         # (L, rep)
-            p     = npz[f'{label}_T{T}_p']            # (L, rep)
-            c = a1_sq * p * (1 - p)                   # per-locus contribution (L, rep)
-
-            # sort DESCENDING within each replicate, then summarise across reps per rank
-            c_sorted = -np.sort(-c, axis=0)           # (L, rep), rank 0 = largest
-            L = c_sorted.shape[0]
-            ranks = np.arange(1, L + 1)
-            mean_curve = c_sorted.mean(axis=1)        # mean contribution at each rank
-            lo = np.quantile(c_sorted, 0.25, axis=1)
-            hi = np.quantile(c_sorted, 0.75, axis=1)
-
-            ax.plot(ranks, mean_curve, color=colors[label], lw=1.6,
-                    label=case_titles[label])
+            ranks, med, mean, lo, hi = rank_summary(npz[f'{label}_T{T}_a1sq'],
+                                                    npz[f'{label}_T{T}_p'])
+            ax.plot(ranks, med,  color=colors[label], lw=1.6, ls='-',
+                    label=case_titles[label])          # median (only this is labelled)
+            ax.plot(ranks, mean, color=colors[label], lw=1.1, ls='--')   # mean
             ax.fill_between(ranks, lo, hi, color=colors[label], alpha=0.15)
+
+        # σ²=0 static baseline overlay (cases coincide -> single black curve)
+        if base_npz is not None:
+            ranks, med, mean, lo, hi = rank_summary(base_npz[f'{a1_name}_T{T}_a1sq'],
+                                                    base_npz[f'{a1_name}_T{T}_p'])
+            ax.plot(ranks, med,  color='k', lw=1.8, ls='-',
+                    label=r'$\sigma^2=0$ baseline')
+            ax.plot(ranks, mean, color='k', lw=1.1, ls='--')
+            ax.fill_between(ranks, lo, hi, color='k', alpha=0.12)
 
         ax.set_yscale('log')
         ax.set_title(f'T = {T}', fontsize=11)
@@ -86,7 +112,12 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
         ax.set_ylabel(r'$a_{1,l}^2\, p_l (1-p_l)$')
         ax.grid(True, which='both', alpha=0.3)
         if pi == 0:
-            ax.legend(fontsize=8, loc='upper right')
+            # case/baseline entries + a style key explaining solid vs dashed
+            handles, labs = ax.get_legend_handles_labels()
+            style_key = [Line2D([0], [0], color='gray', ls='-',  label='median'),
+                         Line2D([0], [0], color='gray', ls='--', label='mean')]
+            ax.legend(handles + style_key, labs + ['median', 'mean'],
+                      fontsize=8, loc='upper right')
 
     # hide any unused panels
     for pi in range(n, len(axes_flat)):
@@ -95,7 +126,8 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
     fig.suptitle(
         rf'Rank plot of per-locus $a_{{1,l}}^2\, p_l(1-p_l)$  '
         rf'(A~{dist_name}, $a_t$~{a1_name}, $a^2$={a2:.2f})'
-        '\n(sorted per replicate, mean across replicates; band = 25–75%)',
+        '\n(solid = median, dashed = mean, band = 25–75%; '
+        r'colour = case, black = $\sigma^2{=}0$ baseline)',
         fontsize=12,
     )
     plt.tight_layout(rect=[0, 0, 1, 0.94])

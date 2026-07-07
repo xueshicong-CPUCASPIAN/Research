@@ -39,23 +39,26 @@ a2 = a2_values[0]          # current value (overwritten inside the sweep loop be
 #   exp/const/gamma/lognormal all have mean a2 -> E[||a||^2]=a2 invariant in T.
 #   twopoint is the user-specified PMF and is NOT mean-a2 / NOT T-invariant:
 #   E[A] = (a2/T)(2 - 1/T) -> shrinks toward 0 as T grows.
-def draw_exp(a2, T, n):    return np.random.exponential(a2, size=n)        # mean a2
 def draw_const(a2, T, n):  return np.full(n, a2)                          # mean a2 (no variance)
-def draw_gamma(a2, T, n):                                                 # mean a2, shape k
-    k = 2.0
-    return np.random.gamma(k, a2 / k, size=n)
-def draw_lognormal(a2, T, n):                                             # mean a2
-    s = 1.0
-    return np.random.lognormal(np.log(a2) - 0.5 * s**2, s, size=n)
-def draw_twopoint(a2, T, n):                                              # a2 w.p. 1/T else a2/T
-    return np.where(np.random.rand(n) < 1.0 / T, a2, a2 / T)
+# ── complex A-scale distributions (disabled) ───────────────────────────────────
+# Simplified to a constant scale A = a2; the variable-scale distributions below are
+# kept for reference but commented out. Re-enable a line in `dists` to use one.
+# def draw_exp(a2, T, n):    return np.random.exponential(a2, size=n)      # mean a2
+# def draw_gamma(a2, T, n):                                               # mean a2, shape k
+#     k = 2.0
+#     return np.random.gamma(k, a2 / k, size=n)
+# def draw_lognormal(a2, T, n):                                           # mean a2
+#     s = 1.0
+#     return np.random.lognormal(np.log(a2) - 0.5 * s**2, s, size=n)
+# def draw_twopoint(a2, T, n):                                            # a2 w.p. 1/T else a2/T
+#     return np.where(np.random.rand(n) < 1.0 / T, a2, a2 / T)
 
 dists = {
-    'twopoint':  draw_twopoint,
-    'exp':       draw_exp,
     'const':     draw_const,
-    'gamma':     draw_gamma,
-    'lognormal': draw_lognormal,
+    # 'twopoint':  draw_twopoint,
+    # 'exp':       draw_exp,
+    # 'gamma':     draw_gamma,
+    # 'lognormal': draw_lognormal,
 }
 
 # ── per-trait effect scaling a_t ~ N(0, A / T**p) ───────────────────────────────
@@ -110,14 +113,14 @@ def simulate_vec(T, cov, rep, draw_A, texp):
     2 * sum_l a1_sq * p (1-p); returning the per-locus arrays (rather than just
     V_g) also lets the histogram scripts reuse this single simulation run.
     """
-    # Effect scale A ~ Exponential(mean a2): drawn FRESH for EVERY new mutation (inside
-    # the generation loop below), so A differs over locus, replicate AND mutation/
-    # generation, while staying the SAME across the T traits of a given mutation.
-    # Given A, each trait effect is a_t = sqrt(A/T) * N(0,1) -- both A and the N(0,1)
-    # draw are fresh per mutation.
-    # => a_t marginally Laplace; E[a_t^2]=a2/T, E[||a||^2]=a2, invariant in T.
+    # Effect scale A = a2 (constant; `draw_const`): the variable-scale distributions are
+    # disabled, so A is the same for every mutation. Given A, each trait effect is
+    # a_t = sqrt(A / T**texp) * N(0,1), drawn fresh per mutation and the SAME across the
+    # T traits of a given mutation.  texp selects the per-trait scaling:
+    #   texp=1   (aT1)    -> a_t ~ N(0, A/T),    E[||a||^2]=A,      invariant in T
+    #   texp=0.5 (aTsqrt) -> a_t ~ N(0, A/sqrt(T)), E[||a||^2]=A*sqrt(T), grows with T
     # effects starts empty (population monomorphic, p=0); each mutation fills its own
-    # (locus, rep) row with a freshly drawn A.
+    # (locus, rep) row.
     effects = np.zeros((L, rep, T))
     opt = np.zeros((T, rep))
     p   = np.zeros((L, rep))
@@ -137,10 +140,9 @@ def simulate_vec(T, cov, rep, draw_A, texp):
         np.place(p, mutation_mask, 1 / N)
         idx = np.where(mutation_mask)
         n_new = len(idx[0])
-        # new mutation: draw a FRESH scale A ~ Exp(a2) per mutation (one per locus*rep
-        # event, SAME across traits) plus a fresh N(0,1) direction.  A thus differs over
-        # locus, replicate, and generation.
-        A_new = draw_A(a2, T, n_new)                            # (n_new,): one fresh scale per mutation
+        # new mutation: scale A = a2 (constant), one per locus*rep event and SAME across
+        # traits, plus a fresh N(0,1) direction.
+        A_new = draw_A(a2, T, n_new)                            # (n_new,): constant scale a2 per mutation
         effects[idx[0], idx[1], :] = (np.random.normal(0, 1, size=(n_new, T))
                                       * np.sqrt(A_new / T**texp)[:, None])
 
@@ -171,6 +173,34 @@ cases = {
     'C': dict(diag_scale='per_trait', off_sign=+1, off_scale='per_trait'),
     'D': dict(diag_scale='per_trait', off_sign=-1, off_scale='per_trait'),
 }
+
+# ── σ²=0 baseline (static optimum): denominator for the V_g ratio plot ─────────
+# At σ²=0 the optimum never moves, so the covariance matrix is all zeros and the
+# four cases A–D coincide. We therefore run just one simulation per (a1-scaling, T)
+# using draw_const (A ≡ a2), and save the per-replicate focal-trait V_g. This is
+# the *simulated* static-optimum baseline, to compare against the analytic
+# Latter–Bulmer value 4·L·μ·V_s in plot_Vg_ratio_over_T.py.
+print("\n############## σ²=0 baseline (static optimum, cases collapse) ##############")
+for a2 in a2_values:                       # sets the global a2 read by simulate_vec
+    base    = {'T_list': np.array(T_list)}   # totals    -> Vg_baseline_sigma0_*.npz
+    base_pl = {'T_list': np.array(T_list)}   # per-locus -> hist_baseline_sigma0_*.npz
+    for a1_name, texp in a1_scalings.items():
+        Vg_T = np.zeros((len(T_list), rep))
+        for ti, T in enumerate(T_list):
+            t0 = time.time()
+            cov0 = make_cov_matrix(0.0, T, diag_scale='full',
+                                   off_sign=+1, off_scale='full')   # all zeros
+            a1_sq, p = simulate_vec(T, cov0, rep, draw_const, texp)
+            Vg_T[ti] = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
+            # keep per-locus arrays so the rank/hist scripts can overlay the baseline
+            base_pl[f'{a1_name}_T{T}_a1sq'] = a1_sq
+            base_pl[f'{a1_name}_T{T}_p']    = p
+            print(f"  baseline a1={a1_name}  T={T}: mean Vg = {Vg_T[ti].mean():.5g}  "
+                  f"[{time.time()-t0:.1f}s]")
+        base[a1_name] = Vg_T
+    np.savez(f'Vg_baseline_sigma0_a2_{a2:.2f}.npz', **base)
+    np.savez(f'hist_baseline_sigma0_a2_{a2:.2f}.npz', **base_pl)
+    print(f"Saved Vg_baseline_sigma0_a2_{a2:.2f}.npz and hist_baseline_sigma0_a2_{a2:.2f}.npz")
 
 for (dist_name, draw_A), (a1_name, texp), a2 in itertools.product(
         dists.items(), a1_scalings.items(), a2_values):

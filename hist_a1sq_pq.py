@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 # a2 (mean effect size) swept; currently a single value
 a2_values = np.array([0.03])
 # A-scale distributions produced by sweep_T_4cases_violin.py (must match its `dists` keys)
-dist_names = ['twopoint', 'exp', 'const', 'gamma', 'lognormal']
+dist_names = ['const']  # complex A-scale dists disabled: 'twopoint', 'exp', 'gamma', 'lognormal'
 # per-trait scaling a_t ~ N(0, A / T**p) (must match violin's `a1_scalings`); name -> p
 a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
 
@@ -47,6 +47,12 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
     npz = np.load(DATA_FILE)
     T_list = list(npz['T_list'])
 
+    # σ²=0 static baseline (same a1-scaling; cases coincide) for faint reference lines
+    BASE_FILE = f'hist_baseline_sigma0_a2_{a2:.2f}.npz'
+    base_npz = np.load(BASE_FILE) if os.path.exists(BASE_FILE) else None
+    if base_npz is None:
+        print(f"[note] {BASE_FILE} not found; σ²=0 baseline not overlaid.")
+
     # ── one figure per T ─────────────────────────────────────────────────────
     for T in T_list:
         fig, axes = plt.subplots(4, 1, figsize=(7, 11), sharex=True)
@@ -68,6 +74,14 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
             xmax = all_vals.max() if all_vals.size else 1.0
         xmax = max(xmax, 1e-12)
 
+        # σ²=0 baseline median/mean for this (a1_name, T) — same in every case panel
+        base_med = base_mean = None
+        if base_npz is not None:
+            bp = base_npz[f'{a1_name}_T{T}_p']
+            bv = (base_npz[f'{a1_name}_T{T}_a1sq'] * bp * (1 - bp)).ravel()
+            base_med  = np.median(bv)
+            base_mean = bv.mean()
+
         for ri, label in enumerate(cases):
             v = case_vals[label]
             ax = axes[ri]
@@ -76,16 +90,28 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
             ax.set_ylabel(case_titles[label], fontsize=9)
             ax.grid(True, alpha=0.3)
 
-            mean_v = v.mean()
+            # solid = median, dashed = mean (same convention as the rank plot).
+            # Both are over ALL pooled values incl. monomorphic zeros, so the mean is
+            # the V_g-additive summary; the median sits left of it (right-skew).
+            mean_v   = v.mean()
+            median_v = np.median(v)
             poly_frac = np.mean(v > 0)
-            ax.axvline(mean_v, color='k', ls='--', lw=0.8,
+            ax.axvline(median_v, color='k', ls='-',  lw=0.9,
+                       label=f'median = {median_v:.2e}')
+            ax.axvline(mean_v,   color='k', ls='--', lw=0.9,
                        label=f'mean = {mean_v:.2e}\npoly frac = {poly_frac:.3f}')
+            # faint σ²=0 baseline reference (same convention: solid median / dashed mean)
+            if base_npz is not None:
+                ax.axvline(base_med,  color='0.5', ls='-',  lw=0.9, alpha=0.8,
+                           label=rf'$\sigma^2{{=}}0$ median = {base_med:.2e}')
+                ax.axvline(base_mean, color='0.5', ls='--', lw=0.9, alpha=0.8,
+                           label=rf'$\sigma^2{{=}}0$ mean = {base_mean:.2e}')
             ax.legend(fontsize=7, loc='upper right')
 
         axes[-1].set_xlabel(r'$a_{1,l}^2\, p_l (1 - p_l)$')
         fig.suptitle(
             rf'Per-locus $a_{{1,l}}^2\, p_l(1-p_l)$,  T = {T}, $a^2$ = {a2:.2f}, $a_t$~{a1_name}'
-            '\n(pooled over all loci × replicates)',
+            '\n(pooled over all loci × replicates; solid = median, dashed = mean)',
             fontsize=12,
         )
         plt.tight_layout(rect=[0, 0, 1, 0.95])
