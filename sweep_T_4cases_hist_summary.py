@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 # a2 (mean effect size) swept; currently a single value
 a2_values = np.array([0.03])
 # A-scale distributions produced by sweep_T_4cases_violin.py (must match its `dists` keys)
-dist_names = ['twopoint', 'exp', 'const', 'gamma', 'lognormal']
+dist_names = ['const']  # complex A-scale dists disabled: 'twopoint', 'exp', 'gamma', 'lognormal'
 # per-trait scaling a_t ~ N(0, A / T**p) (must match violin's `a1_scalings`); name -> p
 a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
 
