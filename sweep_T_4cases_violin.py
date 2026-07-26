@@ -8,10 +8,19 @@ saved per-locus data file is also consumed by the histogram scripts
 (sweep_T_4cases_hist.py, hist_a1sq_pq.py, *_summary.py), so the expensive
 30000-generation simulation is run only once.
 
-Output (one set per a2 value):
+The per-trait DIRECTION distribution is selectable via `dir_dists`:
+  'gauss' -- a_t ~ N(0, A/T**p)      (continuous magnitudes; ~8% of loci get Ns<1)
+  'pm'    -- a_t = +-sqrt(A/T**p)    (the PAPER's |a_i| = a model; no neutral loci)
+It is part of the output tag, so every file says which model produced it:
+  tag = <A-dist>_<direction>_<a1-scaling>_a2_<a2>   e.g. const_pm_aT1_a2_0.03
+
+Output (one set per (A-dist, direction, a1-scaling, a2)):
   hist_T_4cases_data_<tag>.npz  -- per-locus a_{1,l}^2 and p_l (read by hist scripts)
   Vg_sweep_T_4cases_<tag>.npz   -- final Vg per (case, T, replicate) (derived)
   violin_T_4cases_<tag>.pdf     -- violin plot, h^2 vs T, 4 cases side-by-side
+Plus one sigma^2=0 baseline pair per direction:
+  Vg_baseline_sigma0_<direction>_a2_<a2>.npz
+  hist_baseline_sigma0_<direction>_a2_<a2>.npz
 """
 
 import numpy as np
@@ -70,6 +79,27 @@ a1_scalings = {
     'aTsqrt': 0.5,
 }
 
+# ── per-trait DIRECTION distribution ──────────────────────────────────────────
+# Given the scale A, each trait effect is  a_t = sqrt(A / T**p) * D_t,  where D_t is
+# drawn here.  This is a separate axis from the A-scale `dists` above: `dists` sets
+# how the overall magnitude varies between mutations, `dir_dists` sets the shape of
+# each individual trait effect.
+#   'gauss' : D_t ~ N(0,1)  -> a_t ~ N(0, A/T**p).  Continuous magnitudes; with
+#             A = a2 constant this gives a_t^2 ~ (a2/T**p) * chi^2_1, so a sizeable
+#             fraction of loci land at Ns < 1 and drift as if neutral.
+#   'pm'    : D_t = +-1     -> a_t = +-sqrt(A/T**p).  Magnitude IDENTICAL at every
+#             locus, only the sign is random.  This is the PAPER's single-trait
+#             model ("|a_i| = a; a new allele is assigned a_i = +-a with equal
+#             probability") generalised to T traits, and at T=1 with A = a2 it is
+#             exactly a_i = +-sqrt(a2).  No locus is effectively neutral.
+def draw_dir_gauss(n, T):  return np.random.normal(0, 1, size=(n, T))
+def draw_dir_pm(n, T):     return np.random.choice([-1.0, 1.0], size=(n, T))
+
+dir_dists = {
+    'gauss': draw_dir_gauss,
+    'pm':    draw_dir_pm,
+}
+
 # ── simulation core (vectorised over replicates, like the MPI version) ───────
 def pmap(rho):  return rho / (1 + rho)
 def rhomap(p):  return p / (1 - p)
@@ -106,7 +136,7 @@ def chol_or_svd(cov):
         return eigvecs @ np.diag(np.sqrt(eigvals))
 
 
-def simulate_vec(T, cov, rep, draw_A, texp):
+def simulate_vec(T, cov, rep, draw_A, texp, draw_dir):
     """Run `rep` replicates in parallel; return per-locus (a1_sq, p), each (L, rep).
 
     a1_sq = focal-trait squared effect a_{1,l}^2.  V_g(trait 1) is recovered as
@@ -115,8 +145,8 @@ def simulate_vec(T, cov, rep, draw_A, texp):
     """
     # Effect scale A = a2 (constant; `draw_const`): the variable-scale distributions are
     # disabled, so A is the same for every mutation. Given A, each trait effect is
-    # a_t = sqrt(A / T**texp) * N(0,1), drawn fresh per mutation and the SAME across the
-    # T traits of a given mutation.  texp selects the per-trait scaling:
+    # a_t = sqrt(A / T**texp) * D_t with D_t from `draw_dir` ('gauss' -> N(0,1),
+    # 'pm' -> +-1), drawn fresh per mutation.  texp selects the per-trait scaling:
     #   texp=1   (aT1)    -> a_t ~ N(0, A/T),    E[||a||^2]=A,      invariant in T
     #   texp=0.5 (aTsqrt) -> a_t ~ N(0, A/sqrt(T)), E[||a||^2]=A*sqrt(T), grows with T
     # effects starts empty (population monomorphic, p=0); each mutation fills its own
@@ -141,9 +171,9 @@ def simulate_vec(T, cov, rep, draw_A, texp):
         idx = np.where(mutation_mask)
         n_new = len(idx[0])
         # new mutation: scale A = a2 (constant), one per locus*rep event and SAME across
-        # traits, plus a fresh N(0,1) direction.
+        # traits, plus a fresh direction drawn from `draw_dir`.
         A_new = draw_A(a2, T, n_new)                            # (n_new,): constant scale a2 per mutation
-        effects[idx[0], idx[1], :] = (np.random.normal(0, 1, size=(n_new, T))
+        effects[idx[0], idx[1], :] = (draw_dir(n_new, T)
                                       * np.sqrt(A_new / T**texp)[:, None])
 
         # mutation at polymorphic loci
@@ -181,31 +211,36 @@ cases = {
 # the *simulated* static-optimum baseline, to compare against the analytic
 # Latter–Bulmer value 4·L·μ·V_s in plot_Vg_ratio_over_T.py.
 print("\n############## σ²=0 baseline (static optimum, cases collapse) ##############")
-for a2 in a2_values:                       # sets the global a2 read by simulate_vec
-    base    = {'T_list': np.array(T_list)}   # totals    -> Vg_baseline_sigma0_*.npz
-    base_pl = {'T_list': np.array(T_list)}   # per-locus -> hist_baseline_sigma0_*.npz
-    for a1_name, texp in a1_scalings.items():
-        Vg_T = np.zeros((len(T_list), rep))
-        for ti, T in enumerate(T_list):
-            t0 = time.time()
-            cov0 = make_cov_matrix(0.0, T, diag_scale='full',
-                                   off_sign=+1, off_scale='full')   # all zeros
-            a1_sq, p = simulate_vec(T, cov0, rep, draw_const, texp)
-            Vg_T[ti] = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
-            # keep per-locus arrays so the rank/hist scripts can overlay the baseline
-            base_pl[f'{a1_name}_T{T}_a1sq'] = a1_sq
-            base_pl[f'{a1_name}_T{T}_p']    = p
-            print(f"  baseline a1={a1_name}  T={T}: mean Vg = {Vg_T[ti].mean():.5g}  "
-                  f"[{time.time()-t0:.1f}s]")
-        base[a1_name] = Vg_T
-    np.savez(f'Vg_baseline_sigma0_a2_{a2:.2f}.npz', **base)
-    np.savez(f'hist_baseline_sigma0_a2_{a2:.2f}.npz', **base_pl)
-    print(f"Saved Vg_baseline_sigma0_a2_{a2:.2f}.npz and hist_baseline_sigma0_a2_{a2:.2f}.npz")
+# One baseline per direction distribution: a 'pm' run must be compared against a
+# 'pm' baseline, so the direction name goes into the baseline filenames too.
+for dir_name, draw_dir in dir_dists.items():
+    for a2 in a2_values:                   # sets the global a2 read by simulate_vec
+        base    = {'T_list': np.array(T_list)}   # totals    -> Vg_baseline_sigma0_*.npz
+        base_pl = {'T_list': np.array(T_list)}   # per-locus -> hist_baseline_sigma0_*.npz
+        for a1_name, texp in a1_scalings.items():
+            Vg_T = np.zeros((len(T_list), rep))
+            for ti, T in enumerate(T_list):
+                t0 = time.time()
+                cov0 = make_cov_matrix(0.0, T, diag_scale='full',
+                                       off_sign=+1, off_scale='full')   # all zeros
+                a1_sq, p = simulate_vec(T, cov0, rep, draw_const, texp, draw_dir)
+                Vg_T[ti] = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
+                # keep per-locus arrays so the rank/hist scripts can overlay the baseline
+                base_pl[f'{a1_name}_T{T}_a1sq'] = a1_sq
+                base_pl[f'{a1_name}_T{T}_p']    = p
+                print(f"  baseline dir={dir_name}  a1={a1_name}  T={T}: "
+                      f"mean Vg = {Vg_T[ti].mean():.5g}  [{time.time()-t0:.1f}s]")
+            base[a1_name] = Vg_T
+        np.savez(f'Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz', **base)
+        np.savez(f'hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz', **base_pl)
+        print(f"Saved Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz and "
+              f"hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz")
 
-for (dist_name, draw_A), (a1_name, texp), a2 in itertools.product(
-        dists.items(), a1_scalings.items(), a2_values):
-    tag = f"{dist_name}_{a1_name}_a2_{a2:.2f}"
-    print(f"\n############## dist = {dist_name}  a1 = {a1_name}  a2 = {a2:.3f}  ({tag}) ##############")
+for (dist_name, draw_A), (dir_name, draw_dir), (a1_name, texp), a2 in itertools.product(
+        dists.items(), dir_dists.items(), a1_scalings.items(), a2_values):
+    tag = f"{dist_name}_{dir_name}_{a1_name}_a2_{a2:.2f}"
+    print(f"\n############## dist = {dist_name}  dir = {dir_name}  a1 = {a1_name}  "
+          f"a2 = {a2:.3f}  ({tag}) ##############")
 
     # results[case][T_idx] = Vg array of length rep
     results = {label: np.zeros((len(T_list), rep)) for label in cases}
@@ -217,7 +252,7 @@ for (dist_name, draw_A), (a1_name, texp), a2 in itertools.product(
         for label, cfg in cases.items():
             t0 = time.time()
             cov = make_cov_matrix(sigma_e2, T, **cfg)
-            a1_sq, p = simulate_vec(T, cov, rep, draw_A, texp)
+            a1_sq, p = simulate_vec(T, cov, rep, draw_A, texp, draw_dir)
             # focal-trait V_g per replicate = 2 * sum_l a_{1,l}^2 p_l(1-p_l)
             Vg = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
             results[label][ti] = Vg
@@ -287,9 +322,12 @@ for (dist_name, draw_A), (a1_name, texp), a2 in itertools.product(
 
     ax.set_xlabel('Number of trait dimensions $T$', fontsize=13)
     ax.set_ylabel(r'Heritability $h^2$', fontsize=13)
+    dir_label = {'pm': r'$a_t=\pm\sqrt{A/T^p}$ (paper)',
+                 'gauss': r'$a_t\sim N(0,A/T^p)$'}.get(dir_name, dir_name)
     ax.set_title(r'Violin plot of $h^2$ across replicates ' +
-                 f'(A~{dist_name}, $a_t$~{a1_name}, rep={rep}, $a^2={a2:.2f}$, $\\sigma^2=10^{{-3}}$, $V_s=5$, $N=10^4$, $L=100$)',
-                 fontsize=12)
+                 f'(A~{dist_name}, dir={dir_name}: {dir_label}, $a_t$~{a1_name}, rep={rep}, '
+                 f'$a^2={a2:.2f}$, $\\sigma^2=10^{{-3}}$, $V_s=5$, $N=10^4$, $L=100$)',
+                 fontsize=11)
     ax.set_ylim([y_lo, y_hi])
     ax.grid(True, axis='y', alpha=0.3)
 

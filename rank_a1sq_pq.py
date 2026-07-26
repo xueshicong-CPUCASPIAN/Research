@@ -10,10 +10,9 @@ Three quantities are plotted, each in its own figure (one panel per T):
 
 For each replicate the L loci are sorted in DECREASING order of the quantity,
 giving a length-L curve (rank 1 = largest).  At each rank we summarise across
-replicates with BOTH the MEDIAN (solid) and the MEAN (dashed), plus a 25-75%
-band.  The median sits in the middle of its band; the mean rides above it because
-the across-replicate distribution is right-skewed.  For quantity 1 the mean is the
-V_g-additive summary (E[V_g]=2*sum_l mean_l).
+replicates with the MEAN (solid line) plus a 25-75% band.  For quantity 1 the mean
+is the V_g-additive summary (E[V_g]=2*sum_l mean_l).  All T panels share the same
+fixed x- and y-ranges so the subplots are directly comparable.
 
 TAIL CUT-OFF.  Most of the L loci are monomorphic (p=0), so the sorted curves
 collapse to zero in a long tail that carries no information and drops suddenly on
@@ -27,10 +26,15 @@ The static-optimum (sigma^2 = 0) baseline is overlaid in black so the fluctuatin
 cases A-D can be compared against it rank-by-rank.
 
 Reuses the per-locus data produced by sweep_T_4cases_violin.py
-(hist_T_4cases_data_<tag>.npz for A-D, hist_baseline_sigma0_<a2>.npz for the
+(hist_T_4cases_data_<tag>.npz for A-D, hist_baseline_sigma0_<dir>_<a2>.npz for the
 sigma^2 = 0 baseline), so no simulation is run here.
 
-Output (one set per (dist, a1, a2)):
+The tag now carries the per-trait DIRECTION distribution as well, so figures state
+which effect-size model produced them:
+    tag = <A-dist>_<direction>_<a1-scaling>_a2_<a2>   e.g. const_pm_aT1_a2_0.03
+    'gauss' -- a_t ~ N(0, A/T**p)    ; 'pm' -- a_t = +-sqrt(A/T**p) (paper's model)
+
+Output (one set per (dist, direction, a1, a2)):
     rank_a1sq_pq_4cases_<tag>.pdf   -- quantity 1 (a_1^2 p(1-p))
     rank_a1sq_4cases_<tag>.pdf      -- quantity 2 (a_1^2)
     rank_p_4cases_<tag>.pdf         -- quantity 3 (p)
@@ -40,7 +44,6 @@ import os
 import itertools
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 
 # ── tail cut-off controls ──────────────────────────────────────────────────────
 # TOP_RANKS: fixed number of leading ranks to show (int), or None to auto-detect.
@@ -52,11 +55,21 @@ TAIL_REL  = 1e-2      # auto cut-off threshold, relative to the rank-1 mean
 RANK_MIN  = 10        # never show fewer leading ranks than this
 RANK_PAD  = 2         # extra ranks kept past the detected shoulder
 
+# ── fixed axis ranges (shared by every T panel so subplots are comparable) ─────
+# Y_RANGE: fixed (bottom, top) log y-limits applied to every panel of every figure.
+# X_MAX  : fixed max locus rank for the x-axis; None -> one shared auto cut-off
+#          (max of the per-panel tail cut-offs) so all panels still share the x-range.
+Y_RANGE = (1e-4, 1e0)   # y from 10^0 (top) down to 10^-4 (bottom)
+X_MAX   = None          # e.g. set to 40 to force a fixed rank window
+
 # a2 (mean effect size) swept; currently a single value
 a2_values = np.array([0.03])
 # A-scale distributions produced by sweep_T_4cases_violin.py (must match its `dists` keys)
 dist_names = ['const']  # complex A-scale dists disabled: 'twopoint', 'exp', 'gamma', 'lognormal'
-# per-trait scaling a_t ~ N(0, A / T**p) (must match violin's `a1_scalings`); name -> p
+# per-trait DIRECTION distributions (must match violin's `dir_dists` keys):
+#   'gauss' -- a_t ~ N(0, A/T**p)   ; 'pm' -- a_t = +-sqrt(A/T**p), the paper's model
+dir_names = ['gauss', 'pm']
+# per-trait scaling a_t ~ sqrt(A / T**p) * direction (must match violin's `a1_scalings`)
 a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
 
 cases = ['A', 'B', 'C', 'D']
@@ -116,22 +129,23 @@ def head_cutoff(mean_curves):
     return int(np.clip(last + RANK_PAD, RANK_MIN, L))
 
 
-for dist_name, (a1_name, texp), a2 in itertools.product(
-        dist_names, a1_scalings.items(), a2_values):
-    tag = f"{dist_name}_{a1_name}_a2_{a2:.2f}"
+for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
+        dist_names, dir_names, a1_scalings.items(), a2_values):
+    tag = f"{dist_name}_{dir_name}_{a1_name}_a2_{a2:.2f}"
     DATA_FILE = f'hist_T_4cases_data_{tag}.npz'
 
     if not os.path.exists(DATA_FILE):
         print(f"[skip] {DATA_FILE} not found. Run sweep_T_4cases_violin.py first "
-              "to generate the per-locus data for this (dist, a1, a2).")
+              "to generate the per-locus data for this (dist, dir, a1, a2).")
         continue
 
-    print(f"\n############## {DATA_FILE}  (dist = {dist_name}, a1 = {a1_name}, a2 = {a2:.3f}) ##############")
+    print(f"\n############## {DATA_FILE}  (dist = {dist_name}, dir = {dir_name}, "
+          f"a1 = {a1_name}, a2 = {a2:.3f}) ##############")
     npz = np.load(DATA_FILE)
     T_list = list(npz['T_list'])
 
-    # σ²=0 static baseline (same a1-scaling, cases coincide) for overlay, if present
-    BASE_FILE = f'hist_baseline_sigma0_a2_{a2:.2f}.npz'
+    # σ²=0 static baseline (same direction + a1-scaling, cases coincide), if present
+    BASE_FILE = f'hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz'
     base_npz = np.load(BASE_FILE) if os.path.exists(BASE_FILE) else None
     if base_npz is None:
         print(f"[note] {BASE_FILE} not found; σ²=0 baseline not overlaid.")
@@ -145,10 +159,10 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
                                  squeeze=False)
         axes_flat = axes.ravel()
 
-        for pi, T in enumerate(T_list):
-            ax = axes_flat[pi]
-
-            # summarise every series first so the tail cut-off can be shared per panel
+        # ── pass 1: summarise every panel, then pick a SHARED tail cut-off so all
+        #    T panels use the same x-range (coherent subplots) ──────────────────────
+        panel_series = []
+        for T in T_list:
             series = {}   # label -> (ranks, med, mean, lo, hi)
             for label in cases:
                 series[label] = rank_summary(
@@ -157,49 +171,54 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
                 series['baseline'] = rank_summary(
                     qmap(base_npz[f'{a1_name}_T{T}_a1sq'],
                          base_npz[f'{a1_name}_T{T}_p']))
+            panel_series.append(series)
 
-            cut = head_cutoff([s[2] for s in series.values()])   # s[2] = mean
+        L_loci = len(panel_series[0][cases[0]][0])           # ranks length = #loci
+        if X_MAX is not None:
+            cut = int(np.clip(X_MAX, 1, L_loci))             # user-fixed x window
+        else:
+            cut = max(head_cutoff([s[2] for s in sers.values()])  # s[2] = mean
+                      for sers in panel_series)              # shared across panels
 
-            # colour = case (black = σ²=0 baseline); solid = median, dashed = mean.
+        # ── pass 2: plot every panel with the shared cut and fixed axes ────────────
+        for pi, (T, series) in enumerate(zip(T_list, panel_series)):
+            ax = axes_flat[pi]
+            sl = slice(0, cut)
+
+            # colour = case (black = σ²=0 baseline); solid line = mean, band = 25–75%.
             for label in cases:
                 ranks, med, mean, lo, hi = series[label]
-                sl = slice(0, cut)
-                ax.plot(ranks[sl], med[sl],  color=colors[label], lw=1.6, ls='-',
-                        label=case_titles[label])          # median (only this is labelled)
-                ax.plot(ranks[sl], mean[sl], color=colors[label], lw=1.1, ls='--')  # mean
+                ax.plot(ranks[sl], mean[sl], color=colors[label], lw=1.6, ls='-',
+                        label=case_titles[label])          # mean (only this is labelled)
                 ax.fill_between(ranks[sl], lo[sl], hi[sl], color=colors[label], alpha=0.15)
 
             # σ²=0 static baseline overlay (cases coincide -> single black curve)
             if 'baseline' in series:
                 ranks, med, mean, lo, hi = series['baseline']
-                sl = slice(0, cut)
-                ax.plot(ranks[sl], med[sl],  color='k', lw=1.8, ls='-',
+                ax.plot(ranks[sl], mean[sl], color='k', lw=1.8, ls='-',
                         label=r'$\sigma^2=0$ baseline')
-                ax.plot(ranks[sl], mean[sl], color='k', lw=1.1, ls='--')
                 ax.fill_between(ranks[sl], lo[sl], hi[sl], color='k', alpha=0.12)
 
             ax.set_yscale('log')
             ax.set_xlim(1, cut)
+            ax.set_ylim(*Y_RANGE)                            # fixed, shared y-range
             ax.set_title(f'T = {T}', fontsize=11)
             ax.set_xlabel(f'Locus rank (1 = largest; top {cut} shown)')
             ax.set_ylabel(ylabel)
             ax.grid(True, which='both', alpha=0.3)
             if pi == 0:
-                # case/baseline entries + a style key explaining solid vs dashed
-                handles, labs = ax.get_legend_handles_labels()
-                style_key = [Line2D([0], [0], color='gray', ls='-',  label='median'),
-                             Line2D([0], [0], color='gray', ls='--', label='mean')]
-                ax.legend(handles + style_key, labs + ['median', 'mean'],
-                          fontsize=8, loc='upper right')
+                ax.legend(fontsize=8, loc='upper right')
 
         # hide any unused panels
         for pi in range(n, len(axes_flat)):
             axes_flat[pi].axis('off')
 
+        dir_label = {'pm': r'$a_t=\pm\sqrt{A/T^p}$ (paper)',
+                     'gauss': r'$a_t\sim N(0,A/T^p)$'}.get(dir_name, dir_name)
         fig.suptitle(
             rf'Rank plot of per-locus {qtitle}  '
-            rf'(A~{dist_name}, $a_t$~{a1_name}, $a^2$={a2:.2f})'
-            '\n(solid = median, dashed = mean, band = 25–75%; '
+            rf'(A~{dist_name}, dir={dir_name}: {dir_label}, $a_t$~{a1_name}, $a^2$={a2:.2f})'
+            '\n(line = mean, band = 25–75%; '
             r'colour = case, black = $\sigma^2{=}0$ baseline; tail cut, head zoomed)',
             fontsize=12,
         )
