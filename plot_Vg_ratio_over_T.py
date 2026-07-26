@@ -51,6 +51,9 @@ print(f"Analytic baseline  V_g|sigma^2=0 = 4*L*mu*V_s / T "
 # tags to look for (must match the sweep's dists / a1_scalings / a2_values)
 a2_values   = np.array([0.03])
 dist_names  = ['const']                 # complex A-scale dists disabled
+# per-trait DIRECTION distributions (must match violin's `dir_dists` keys):
+#   'gauss' -- a_t ~ N(0, A/T**p)   ; 'pm' -- a_t = +-sqrt(A/T**p), the paper's model
+dir_names   = ['gauss', 'pm']
 a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
 
 cases   = ['A', 'B', 'C', 'D']
@@ -67,11 +70,11 @@ labels  = {
 # IS the analytic static-optimum prediction. Two things are shown against it:
 #   • simulated σ²=0 baseline / analytic   -> how close the static sim is to theory
 #   • simulated σ²>0 cases A–D / analytic  -> the fluctuating-optimum variance
-for dist_name, (a1_name, _), a2 in itertools.product(
-        dist_names, a1_scalings.items(), a2_values):
-    tag       = f"{dist_name}_{a1_name}_a2_{a2:.2f}"
+for dist_name, dir_name, (a1_name, _), a2 in itertools.product(
+        dist_names, dir_names, a1_scalings.items(), a2_values):
+    tag       = f"{dist_name}_{dir_name}_{a1_name}_a2_{a2:.2f}"
     DATA_FILE = f'Vg_sweep_T_4cases_{tag}.npz'
-    BASE_FILE = f'Vg_baseline_sigma0_a2_{a2:.2f}.npz'
+    BASE_FILE = f'Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz'
 
     if not os.path.exists(DATA_FILE):
         print(f"[skip] {DATA_FILE} not found. Run sweep_T_4cases_violin.py first.")
@@ -117,7 +120,7 @@ for dist_name, (a1_name, _), a2 in itertools.product(
         rf'Genetic variance relative to the analytic static baseline'
         '\n'
         rf'(analytic $4L\mu V_s/T$, $4L\mu V_s={Vg_static_1:.4g}$;  '
-        rf'A~{dist_name}, $a_t$~{a1_name}, $a^2$={a2:.2f})'
+        rf'A~{dist_name}, dir={dir_name}, $a_t$~{a1_name}, $a^2$={a2:.2f})'
     )
     ax.legend(fontsize=8, loc='best')
     fig.tight_layout()

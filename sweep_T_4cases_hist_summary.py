@@ -22,6 +22,9 @@ import matplotlib.pyplot as plt
 a2_values = np.array([0.03])
 # A-scale distributions produced by sweep_T_4cases_violin.py (must match its `dists` keys)
 dist_names = ['const']  # complex A-scale dists disabled: 'twopoint', 'exp', 'gamma', 'lognormal'
+# per-trait DIRECTION distributions (must match violin's `dir_dists` keys):
+#   'gauss' -- a_t ~ N(0, A/T**p)   ; 'pm' -- a_t = +-sqrt(A/T**p), the paper's model
+dir_names = ['gauss', 'pm']
 # per-trait scaling a_t ~ N(0, A / T**p) (must match violin's `a1_scalings`); name -> p
 a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
 
@@ -34,9 +37,9 @@ labels = {
     'D': r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
 }
 
-for dist_name, (a1_name, texp), a2 in itertools.product(
-        dist_names, a1_scalings.items(), a2_values):
-    tag = f"{dist_name}_{a1_name}_a2_{a2:.2f}"
+for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
+        dist_names, dir_names, a1_scalings.items(), a2_values):
+    tag = f"{dist_name}_{dir_name}_{a1_name}_a2_{a2:.2f}"
     DATA_FILE = f'hist_T_4cases_data_{tag}.npz'
 
     if not os.path.exists(DATA_FILE):
@@ -44,7 +47,8 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
               "to generate the per-locus data for this (dist, a1, a2).")
         continue
 
-    print(f"\n############## {DATA_FILE}  (dist = {dist_name}, a1 = {a1_name}, a2 = {a2:.3f}) ##############")
+    print(f"\n############## {DATA_FILE}  (dist = {dist_name}, dir = {dir_name}, "
+          f"a1 = {a1_name}, a2 = {a2:.3f}) ##############")
     d = np.load(DATA_FILE)
     T_list = d['T_list']
 
@@ -108,7 +112,9 @@ for dist_name, (a1_name, texp), a2 in itertools.product(
                  '\n(direct driver of $V_g$)')
     ax.grid(True, which='both', alpha=0.3)
 
-    plt.tight_layout()
+    fig.suptitle(f'A~{dist_name}, dir={dir_name}, $a_t$~{a1_name}, $a^2$={a2:.2f}',
+                 fontsize=11)
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
     fname = f'hist_T_4cases_summary_{tag}.pdf'
     plt.savefig(fname, bbox_inches='tight')
     plt.close(fig)
