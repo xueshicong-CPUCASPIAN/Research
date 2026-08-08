@@ -22,10 +22,11 @@ a2_values = np.array([0.03])
 # A-scale distributions produced by sweep_T_4cases_violin.py (must match its `dists` keys)
 dist_names = ['const']  # complex A-scale dists disabled: 'twopoint', 'exp', 'gamma', 'lognormal'
 # per-trait DIRECTION distributions (must match violin's `dir_dists` keys):
-#   'gauss' -- a_t ~ N(0, A/T**p)   ; 'pm' -- a_t = +-sqrt(A/T**p), the paper's model
+#   'gauss' -- a_t ~ N(0, A/T)   ; 'pm' -- a_t = +-sqrt(A/T), the paper's model
 dir_names = ['gauss', 'pm']
-# per-trait scaling a_t ~ N(0, A / T**p) (must match violin's `a1_scalings`); name -> p
-a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
+# per-trait scaling is fixed at a_t ~ sqrt(A/T) * direction; A1_TAG must match
+# violin's `A1_TAG` since it appears in the filenames and baseline .npz keys.
+A1_TAG = 'aT1'
 
 cases = ['A', 'B', 'C', 'D']
 colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
@@ -36,9 +37,9 @@ case_titles = {
     'D': r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
 }
 
-for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
-        dist_names, dir_names, a1_scalings.items(), a2_values):
-    tag = f"{dist_name}_{dir_name}_{a1_name}_a2_{a2:.2f}"
+for dist_name, dir_name, a2 in itertools.product(
+        dist_names, dir_names, a2_values):
+    tag = f"{dist_name}_{dir_name}_{A1_TAG}_a2_{a2:.2f}"
     DATA_FILE = f'hist_T_4cases_data_{tag}.npz'
 
     if not os.path.exists(DATA_FILE):
@@ -47,11 +48,11 @@ for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
         continue
 
     print(f"\n############## {DATA_FILE}  (dist = {dist_name}, dir = {dir_name}, "
-          f"a1 = {a1_name}, a2 = {a2:.3f}) ##############")
+          f"a2 = {a2:.3f}) ##############")
     npz = np.load(DATA_FILE)
     T_list = list(npz['T_list'])
 
-    # σ²=0 static baseline (same a1-scaling; cases coincide) for faint reference lines
+    # σ²=0 static baseline (cases coincide) for faint reference lines
     BASE_FILE = f'hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz'
     base_npz = np.load(BASE_FILE) if os.path.exists(BASE_FILE) else None
     if base_npz is None:
@@ -78,11 +79,11 @@ for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
             xmax = all_vals.max() if all_vals.size else 1.0
         xmax = max(xmax, 1e-12)
 
-        # σ²=0 baseline median/mean for this (a1_name, T) — same in every case panel
+        # σ²=0 baseline median/mean for this T — same in every case panel
         base_med = base_mean = None
         if base_npz is not None:
-            bp = base_npz[f'{a1_name}_T{T}_p']
-            bv = (base_npz[f'{a1_name}_T{T}_a1sq'] * bp * (1 - bp)).ravel()
+            bp = base_npz[f'{A1_TAG}_T{T}_p']
+            bv = (base_npz[f'{A1_TAG}_T{T}_a1sq'] * bp * (1 - bp)).ravel()
             base_med  = np.median(bv)
             base_mean = bv.mean()
 
@@ -115,7 +116,7 @@ for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
         axes[-1].set_xlabel(r'$a_{1,l}^2\, p_l (1 - p_l)$')
         fig.suptitle(
             rf'Per-locus $a_{{1,l}}^2\, p_l(1-p_l)$,  T = {T}, $a^2$ = {a2:.2f}, '
-            rf'$a_t$~{a1_name}, dir={dir_name}'
+            rf'dir={dir_name}'
             '\n(pooled over all loci × replicates; solid = median, dashed = mean)',
             fontsize=12,
         )

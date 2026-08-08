@@ -3,21 +3,32 @@
 Vectorised sweep over T (number of trait dimensions) for the 4 covariance
 cases.  THIS IS THE SINGLE SIMULATION SCRIPT: for each (T, case) it runs `rep`
 replicate populations (vectorised over numpy arrays) and saves the per-locus
-final state (a_{1,l}^2 and p_l).  It produces the h^2 violin plot, and the
+state (a_{1,l}^2 and p_l).  It produces the h^2 violin plot, and the
 saved per-locus data file is also consumed by the histogram scripts
 (sweep_T_4cases_hist.py, hist_a1sq_pq.py, *_summary.py), so the expensive
 30000-generation simulation is run only once.
 
-The per-trait DIRECTION distribution is selectable via `dir_dists`:
-  'gauss' -- a_t ~ N(0, A/T**p)      (continuous magnitudes; ~8% of loci get Ns<1)
-  'pm'    -- a_t = +-sqrt(A/T**p)    (the PAPER's |a_i| = a model; no neutral loci)
-It is part of the output tag, so every file says which model produced it:
-  tag = <A-dist>_<direction>_<a1-scaling>_a2_<a2>   e.g. const_pm_aT1_a2_0.03
+BURN-IN.  Populations start monomorphic, so the first few thousand generations are
+a transient.  The first BURN_IN generations are discarded, then the state is
+snapshotted every SAMPLE_EVERY generations and the snapshots are pooled along the
+replicate axis (see the parameter block for the measured numbers behind the
+choice).  Downstream scripts therefore receive rep*n_snap columns instead of rep
+and need no change.  trace_Vg_over_gens_<tag>.pdf plots V_g from generation 0 with
+the discarded burn-in shaded, so the choice can be verified against the data.
 
-Output (one set per (A-dist, direction, a1-scaling, a2)):
+Each trait effect scales as a_t ~ sqrt(A/T), so E[||a||^2] = E[A] whatever T is.
+
+The per-trait DIRECTION distribution is selectable via `dir_dists`:
+  'gauss' -- a_t ~ N(0, A/T)      (continuous magnitudes; ~8% of loci get Ns<1)
+  'pm'    -- a_t = +-sqrt(A/T)    (the PAPER's |a_i| = a model; no neutral loci)
+It is part of the output tag, so every file says which model produced it:
+  tag = <A-dist>_<direction>_aT1_a2_<a2>   e.g. const_pm_aT1_a2_0.03
+
+Output (one set per (A-dist, direction, a2)):
   hist_T_4cases_data_<tag>.npz  -- per-locus a_{1,l}^2 and p_l (read by hist scripts)
   Vg_sweep_T_4cases_<tag>.npz   -- final Vg per (case, T, replicate) (derived)
   violin_T_4cases_<tag>.pdf     -- violin plot, h^2 vs T, 4 cases side-by-side
+  trace_Vg_over_gens_<tag>.pdf  -- V_g vs generation, burn-in shaded (diagnostic)
 Plus one sigma^2=0 baseline pair per direction:
   Vg_baseline_sigma0_<direction>_a2_<a2>.npz
   hist_baseline_sigma0_<direction>_a2_<a2>.npz
@@ -38,6 +49,32 @@ sigma_e2  = 1e-3
 maxiter   = 30000
 rep       = 100            # replicates per (T, case)
 T_list    = [1, 5, 20, 100]
+
+# ── burn-in and post-burn-in sampling ─────────────────────────────────────────
+# The population starts monomorphic (p=0 everywhere), so the first few thousand
+# generations are a transient in which V_g climbs to its mutation-selection-drift
+# equilibrium.  Those generations must not enter any statistic.
+#
+# Numbers below come from a measured trajectory diagnostic (rep=20, 'pm', cases A
+# and D plus the sigma^2=0 baseline, at T=1 and T=100, V_g recorded every 100
+# generations from gen 0):
+#   * slowest series reached 95% of its plateau by generation 4600 and 99% by 6500;
+#   * block means over 5-10k, 10-15k, 15-20k, 20-25k, 25-30k showed no residual
+#     trend (scatter ~5%, no direction), so the process is stationary from ~5000 on;
+#   * the integrated autocorrelation time of V_g was 470-1300 generations, worst case
+#     ~1300, so snapshots must be spaced well beyond that to be near-independent.
+# BURN_IN = 10000 is ~1.5x the slowest 99% equilibration time; SAMPLE_EVERY = 2000
+# is ~1.5x the worst autocorrelation time.  maxiter is unchanged, so the run costs
+# the same as before but yields 11 snapshots instead of 1.
+BURN_IN      = 10000   # generations discarded; no snapshot is taken before this
+SAMPLE_EVERY = 2000    # generations between post-burn-in snapshots
+TRACE_EVERY  = 100     # generations between V_g recordings for the trajectory plot
+
+# snapshot generations: 10000, 12000, ..., 30000  -> 11 snapshots per replicate
+SNAP_GENS = list(range(BURN_IN, maxiter + 1, SAMPLE_EVERY))
+n_snap    = len(SNAP_GENS)
+rep_eff   = rep * n_snap   # pooled sample size seen by every downstream script
+assert BURN_IN < maxiter, "BURN_IN must leave at least one snapshot generation"
 # a2 (mean effect size) swept; currently a single value
 a2_values = np.array([0.03])
 a2 = a2_values[0]          # current value (overwritten inside the sweep loop below)
@@ -70,24 +107,21 @@ dists = {
     # 'lognormal': draw_lognormal,
 }
 
-# ── per-trait effect scaling a_t ~ N(0, A / T**p) ───────────────────────────────
-# p controls how each trait effect shrinks with the number of dimensions T.
-#   aT1   (p=1)   : a_t ~ N(0, A/T)        -> E[||a||^2]=E[A]   (T-invariant)
-#   aTsqrt(p=0.5) : a_t ~ N(0, A/sqrt(T))  -> E[||a||^2]=E[A]*sqrt(T) (grows with T)
-a1_scalings = {
-    'aT1':    1.0,
-    'aTsqrt': 0.5,
-}
+# ── per-trait effect scaling a_t ~ N(0, A / T) ─────────────────────────────────
+# Each trait effect shrinks as 1/T, so E[||a||^2] = E[A] independently of T.
+# A1_TAG only names this scaling in filenames and .npz keys; it is kept so the
+# already-generated *_aT1_*.npz data stay readable.
+A1_TAG = 'aT1'
 
 # ── per-trait DIRECTION distribution ──────────────────────────────────────────
-# Given the scale A, each trait effect is  a_t = sqrt(A / T**p) * D_t,  where D_t is
+# Given the scale A, each trait effect is  a_t = sqrt(A / T) * D_t,  where D_t is
 # drawn here.  This is a separate axis from the A-scale `dists` above: `dists` sets
 # how the overall magnitude varies between mutations, `dir_dists` sets the shape of
 # each individual trait effect.
-#   'gauss' : D_t ~ N(0,1)  -> a_t ~ N(0, A/T**p).  Continuous magnitudes; with
-#             A = a2 constant this gives a_t^2 ~ (a2/T**p) * chi^2_1, so a sizeable
+#   'gauss' : D_t ~ N(0,1)  -> a_t ~ N(0, A/T).  Continuous magnitudes; with
+#             A = a2 constant this gives a_t^2 ~ (a2/T) * chi^2_1, so a sizeable
 #             fraction of loci land at Ns < 1 and drift as if neutral.
-#   'pm'    : D_t = +-1     -> a_t = +-sqrt(A/T**p).  Magnitude IDENTICAL at every
+#   'pm'    : D_t = +-1     -> a_t = +-sqrt(A/T).  Magnitude IDENTICAL at every
 #             locus, only the sign is random.  This is the PAPER's single-trait
 #             model ("|a_i| = a; a new allele is assigned a_i = +-a with equal
 #             probability") generalised to T traits, and at T=1 with A = a2 it is
@@ -136,8 +170,19 @@ def chol_or_svd(cov):
         return eigvecs @ np.diag(np.sqrt(eigvals))
 
 
-def simulate_vec(T, cov, rep, draw_A, texp, draw_dir):
-    """Run `rep` replicates in parallel; return per-locus (a1_sq, p), each (L, rep).
+def simulate_vec(T, cov, rep, draw_A, draw_dir):
+    """Run `rep` replicates in parallel for `maxiter` generations.
+
+    Returns
+      a1_sq, p    -- per-locus focal-trait data, each (L, rep*n_snap).  The first
+                     BURN_IN generations are discarded; the state is then snapshotted
+                     every SAMPLE_EVERY generations and the snapshots are pooled along
+                     the replicate axis, so downstream scripts see rep_eff = rep*n_snap
+                     columns and need no change.  Snapshots are spaced past the
+                     measured autocorrelation time, so they are near-independent.
+      trace_gen   -- (n_trace,) generations at which the trajectory was recorded
+      trace_Vg    -- (n_trace, rep) focal-trait V_g at those generations, recorded
+                     from generation 0 so the burn-in itself stays inspectable.
 
     a1_sq = focal-trait squared effect a_{1,l}^2.  V_g(trait 1) is recovered as
     2 * sum_l a1_sq * p (1-p); returning the per-locus arrays (rather than just
@@ -145,16 +190,18 @@ def simulate_vec(T, cov, rep, draw_A, texp, draw_dir):
     """
     # Effect scale A = a2 (constant; `draw_const`): the variable-scale distributions are
     # disabled, so A is the same for every mutation. Given A, each trait effect is
-    # a_t = sqrt(A / T**texp) * D_t with D_t from `draw_dir` ('gauss' -> N(0,1),
-    # 'pm' -> +-1), drawn fresh per mutation.  texp selects the per-trait scaling:
-    #   texp=1   (aT1)    -> a_t ~ N(0, A/T),    E[||a||^2]=A,      invariant in T
-    #   texp=0.5 (aTsqrt) -> a_t ~ N(0, A/sqrt(T)), E[||a||^2]=A*sqrt(T), grows with T
+    # a_t = sqrt(A / T) * D_t with D_t from `draw_dir` ('gauss' -> N(0,1), 'pm' -> +-1),
+    # drawn fresh per mutation, so E[||a||^2] = A independently of T.
     # effects starts empty (population monomorphic, p=0); each mutation fills its own
     # (locus, rep) row.
     effects = np.zeros((L, rep, T))
     opt = np.zeros((T, rep))
     p   = np.zeros((L, rep))
     Lchol = chol_or_svd(cov)
+
+    snap_gens = set(SNAP_GENS)
+    snaps_a1sq, snaps_p = [], []
+    trace_gen, trace_Vg = [], []
 
     for t in range(maxiter):
         fixed_loci_1 = (p == 1)
@@ -174,7 +221,7 @@ def simulate_vec(T, cov, rep, draw_A, texp, draw_dir):
         # traits, plus a fresh direction drawn from `draw_dir`.
         A_new = draw_A(a2, T, n_new)                            # (n_new,): constant scale a2 per mutation
         effects[idx[0], idx[1], :] = (draw_dir(n_new, T)
-                                      * np.sqrt(A_new / T**texp)[:, None])
+                                      * np.sqrt(A_new / T)[:, None])
 
         # mutation at polymorphic loci
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)
@@ -190,10 +237,22 @@ def simulate_vec(T, cov, rep, draw_A, texp, draw_dir):
         z = np.random.randn(T, rep)
         opt = (1 - theta) * opt + Lchol @ z
 
-    # Return per-locus focal-trait data; V_g is recovered downstream as
+        # ── recording.  `t` counts completed updates, so the state now describes
+        #    generation t+1. ────────────────────────────────────────────────────
+        gen = t + 1
+        if gen % TRACE_EVERY == 0:
+            a1_sq_now = effects[:, :, 0] ** 2
+            trace_gen.append(gen)
+            trace_Vg.append(2 * np.sum(a1_sq_now * p * (1 - p), axis=0))
+        if gen in snap_gens:                     # post-burn-in snapshot
+            snaps_a1sq.append(effects[:, :, 0] ** 2)
+            snaps_p.append(p.copy())
+
+    # Pool the snapshots along the replicate axis; V_g is recovered downstream as
     # 2 * sum_l a1_sq * p (1-p), which also feeds the histogram scripts.
-    a1_sq = effects[:, :, 0] ** 2          # (L, rep): focal-trait squared effect
-    return a1_sq, p
+    a1_sq = np.concatenate(snaps_a1sq, axis=1)   # (L, rep*n_snap)
+    p_out = np.concatenate(snaps_p,    axis=1)   # (L, rep*n_snap)
+    return a1_sq, p_out, np.array(trace_gen), np.stack(trace_Vg, axis=0)
 
 
 # ── main loop ────────────────────────────────────────────────────────────────
@@ -206,56 +265,62 @@ cases = {
 
 # ── σ²=0 baseline (static optimum): denominator for the V_g ratio plot ─────────
 # At σ²=0 the optimum never moves, so the covariance matrix is all zeros and the
-# four cases A–D coincide. We therefore run just one simulation per (a1-scaling, T)
-# using draw_const (A ≡ a2), and save the per-replicate focal-trait V_g. This is
+# four cases A–D coincide. We therefore run just one simulation per T using
+# draw_const (A ≡ a2), and save the per-replicate focal-trait V_g. This is
 # the *simulated* static-optimum baseline, to compare against the analytic
 # Latter–Bulmer value 4·L·μ·V_s in plot_Vg_ratio_over_T.py.
 print("\n############## σ²=0 baseline (static optimum, cases collapse) ##############")
+# (dir_name, T) -> (generations, mean V_g) so the per-(dist,dir) trace figure below
+# can show the baseline transient next to the four cases.
+baseline_traces = {}
 # One baseline per direction distribution: a 'pm' run must be compared against a
 # 'pm' baseline, so the direction name goes into the baseline filenames too.
 for dir_name, draw_dir in dir_dists.items():
     for a2 in a2_values:                   # sets the global a2 read by simulate_vec
         base    = {'T_list': np.array(T_list)}   # totals    -> Vg_baseline_sigma0_*.npz
         base_pl = {'T_list': np.array(T_list)}   # per-locus -> hist_baseline_sigma0_*.npz
-        for a1_name, texp in a1_scalings.items():
-            Vg_T = np.zeros((len(T_list), rep))
-            for ti, T in enumerate(T_list):
-                t0 = time.time()
-                cov0 = make_cov_matrix(0.0, T, diag_scale='full',
-                                       off_sign=+1, off_scale='full')   # all zeros
-                a1_sq, p = simulate_vec(T, cov0, rep, draw_const, texp, draw_dir)
-                Vg_T[ti] = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
-                # keep per-locus arrays so the rank/hist scripts can overlay the baseline
-                base_pl[f'{a1_name}_T{T}_a1sq'] = a1_sq
-                base_pl[f'{a1_name}_T{T}_p']    = p
-                print(f"  baseline dir={dir_name}  a1={a1_name}  T={T}: "
-                      f"mean Vg = {Vg_T[ti].mean():.5g}  [{time.time()-t0:.1f}s]")
-            base[a1_name] = Vg_T
+        Vg_T = np.zeros((len(T_list), rep_eff))
+        for ti, T in enumerate(T_list):
+            t0 = time.time()
+            cov0 = make_cov_matrix(0.0, T, diag_scale='full',
+                                   off_sign=+1, off_scale='full')   # all zeros
+            a1_sq, p, tr_gen, tr_Vg = simulate_vec(T, cov0, rep, draw_const, draw_dir)
+            Vg_T[ti] = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
+            # keep the mean trajectory so the main loop can overlay it on the trace figure
+            baseline_traces[(dir_name, T)] = (tr_gen, tr_Vg.mean(axis=1))
+            # keep per-locus arrays so the rank/hist scripts can overlay the baseline
+            base_pl[f'{A1_TAG}_T{T}_a1sq'] = a1_sq
+            base_pl[f'{A1_TAG}_T{T}_p']    = p
+            print(f"  baseline dir={dir_name}  T={T}: "
+                  f"mean Vg = {Vg_T[ti].mean():.5g}  [{time.time()-t0:.1f}s]")
+        base[A1_TAG] = Vg_T
         np.savez(f'Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz', **base)
         np.savez(f'hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz', **base_pl)
         print(f"Saved Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz and "
               f"hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz")
 
-for (dist_name, draw_A), (dir_name, draw_dir), (a1_name, texp), a2 in itertools.product(
-        dists.items(), dir_dists.items(), a1_scalings.items(), a2_values):
-    tag = f"{dist_name}_{dir_name}_{a1_name}_a2_{a2:.2f}"
-    print(f"\n############## dist = {dist_name}  dir = {dir_name}  a1 = {a1_name}  "
+for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
+        dists.items(), dir_dists.items(), a2_values):
+    tag = f"{dist_name}_{dir_name}_{A1_TAG}_a2_{a2:.2f}"
+    print(f"\n############## dist = {dist_name}  dir = {dir_name}  "
           f"a2 = {a2:.3f}  ({tag}) ##############")
 
-    # results[case][T_idx] = Vg array of length rep
-    results = {label: np.zeros((len(T_list), rep)) for label in cases}
+    # results[case][T_idx] = Vg array of length rep_eff (replicates x snapshots)
+    results = {label: np.zeros((len(T_list), rep_eff)) for label in cases}
     # per-locus arrays saved for the histogram scripts (read by sweep_T_4cases_hist.py etc.)
     save_dict = {'T_list': np.array(T_list)}
+    traces = {}          # (T, case) -> (generations, mean V_g) for the trace figure
 
     for ti, T in enumerate(T_list):
         print(f"\n=== T = {T} ===")
         for label, cfg in cases.items():
             t0 = time.time()
             cov = make_cov_matrix(sigma_e2, T, **cfg)
-            a1_sq, p = simulate_vec(T, cov, rep, draw_A, texp, draw_dir)
-            # focal-trait V_g per replicate = 2 * sum_l a_{1,l}^2 p_l(1-p_l)
+            a1_sq, p, tr_gen, tr_Vg = simulate_vec(T, cov, rep, draw_A, draw_dir)
+            # focal-trait V_g per pooled sample = 2 * sum_l a_{1,l}^2 p_l(1-p_l)
             Vg = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
             results[label][ti] = Vg
+            traces[(T, label)] = (tr_gen, tr_Vg.mean(axis=1))
             # stash per-locus arrays so the histogram scripts can reuse this run
             save_dict[f'{label}_T{T}_a1sq'] = a1_sq
             save_dict[f'{label}_T{T}_p']    = p
@@ -267,11 +332,54 @@ for (dist_name, draw_A), (dir_name, draw_dir), (a1_name, texp), a2 in itertools.
     # (1) per-locus data — consumed by sweep_T_4cases_hist.py, hist_a1sq_pq.py, *_summary.py
     np.savez(f'hist_T_4cases_data_{tag}.npz', **save_dict)
     print(f"\nSaved hist_T_4cases_data_{tag}.npz")
-    # (2) derived per-replicate Vg (convenience / downstream)
+    # (2) derived per-sample Vg (convenience / downstream)
     np.savez(f'Vg_sweep_T_4cases_{tag}.npz',
              T_list=np.array(T_list),
              A=results['A'], B=results['B'], C=results['C'], D=results['D'])
     print(f"Saved Vg_sweep_T_4cases_{tag}.npz")
+
+    # ── V_g trajectory over generations (burn-in diagnostic) ─────────────────
+    # One panel per T; each curve is the across-replicate mean V_g.  The discarded
+    # burn-in is shaded and the snapshot generations are marked, so the choice of
+    # BURN_IN can be checked against the data rather than taken on trust.
+    tr_colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
+    ncol = 2
+    nrow = int(np.ceil(len(T_list) / ncol))
+    figt, axest = plt.subplots(nrow, ncol, figsize=(7.0 * ncol, 4.2 * nrow),
+                               squeeze=False)
+    for ti, T in enumerate(T_list):
+        axt = axest.ravel()[ti]
+        axt.axvspan(0, BURN_IN, color='0.85', zorder=0)
+        axt.text(BURN_IN / 2, 0.97, f'burn-in\n(discarded)\n{BURN_IN} gens',
+                 transform=axt.get_xaxis_transform(), ha='center', va='top',
+                 fontsize=8, color='0.35')
+        for label in cases:
+            g, v = traces[(T, label)]
+            axt.plot(g, v, color=tr_colors[label], lw=1.2, label=f'case {label}')
+        if (dir_name, T) in baseline_traces:
+            g, v = baseline_traces[(dir_name, T)]
+            axt.plot(g, v, color='k', lw=1.4, label=r'$\sigma^2=0$ baseline')
+        for sg in SNAP_GENS:
+            axt.axvline(sg, color='0.4', ls=':', lw=0.6, zorder=0)
+        axt.set_yscale('log')
+        axt.set_xlim(0, maxiter)
+        axt.set_title(f'T = {T}', fontsize=11)
+        axt.set_xlabel('generation')
+        axt.set_ylabel(r'$V_g$(trait 1), mean over replicates')
+        axt.grid(True, which='both', alpha=0.3)
+        if ti == 0:
+            axt.legend(fontsize=8, loc='lower right')
+    for pi in range(len(T_list), nrow * ncol):
+        axest.ravel()[pi].axis('off')
+    figt.suptitle(
+        rf'$V_g$ vs generation  (A~{dist_name}, dir={dir_name}, $a^2$={a2:.2f})'
+        f'\nburn-in = {BURN_IN} gens discarded; {n_snap} snapshots every '
+        f'{SAMPLE_EVERY} gens (dotted) -> {rep_eff} pooled samples per (T, case)',
+        fontsize=11)
+    figt.tight_layout(rect=[0, 0, 1, 0.93])
+    figt.savefig(f'trace_Vg_over_gens_{tag}.pdf', bbox_inches='tight')
+    plt.close(figt)
+    print(f"Saved trace_Vg_over_gens_{tag}.pdf")
 
     # ── violin plot ──────────────────────────────────────────────────────────
     colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
@@ -322,10 +430,11 @@ for (dist_name, draw_A), (dir_name, draw_dir), (a1_name, texp), a2 in itertools.
 
     ax.set_xlabel('Number of trait dimensions $T$', fontsize=13)
     ax.set_ylabel(r'Heritability $h^2$', fontsize=13)
-    dir_label = {'pm': r'$a_t=\pm\sqrt{A/T^p}$ (paper)',
-                 'gauss': r'$a_t\sim N(0,A/T^p)$'}.get(dir_name, dir_name)
+    dir_label = {'pm': r'$a_t=\pm\sqrt{A/T}$ (paper)',
+                 'gauss': r'$a_t\sim N(0,A/T)$'}.get(dir_name, dir_name)
     ax.set_title(r'Violin plot of $h^2$ across replicates ' +
-                 f'(A~{dist_name}, dir={dir_name}: {dir_label}, $a_t$~{a1_name}, rep={rep}, '
+                 f'(A~{dist_name}, dir={dir_name}: {dir_label}, '
+                 f'{rep} reps x {n_snap} post-burn-in snapshots = {rep_eff} samples, '
                  f'$a^2={a2:.2f}$, $\\sigma^2=10^{{-3}}$, $V_s=5$, $N=10^4$, $L=100$)',
                  fontsize=11)
     ax.set_ylim([y_lo, y_hi])

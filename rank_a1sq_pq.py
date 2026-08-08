@@ -31,10 +31,10 @@ sigma^2 = 0 baseline), so no simulation is run here.
 
 The tag now carries the per-trait DIRECTION distribution as well, so figures state
 which effect-size model produced them:
-    tag = <A-dist>_<direction>_<a1-scaling>_a2_<a2>   e.g. const_pm_aT1_a2_0.03
-    'gauss' -- a_t ~ N(0, A/T**p)    ; 'pm' -- a_t = +-sqrt(A/T**p) (paper's model)
+    tag = <A-dist>_<direction>_aT1_a2_<a2>   e.g. const_pm_aT1_a2_0.03
+    'gauss' -- a_t ~ N(0, A/T)    ; 'pm' -- a_t = +-sqrt(A/T) (paper's model)
 
-Output (one set per (dist, direction, a1, a2)):
+Output (one set per (dist, direction, a2)):
     rank_a1sq_pq_4cases_<tag>.pdf   -- quantity 1 (a_1^2 p(1-p))
     rank_a1sq_4cases_<tag>.pdf      -- quantity 2 (a_1^2)
     rank_p_4cases_<tag>.pdf         -- quantity 3 (p)
@@ -67,10 +67,11 @@ a2_values = np.array([0.03])
 # A-scale distributions produced by sweep_T_4cases_violin.py (must match its `dists` keys)
 dist_names = ['const']  # complex A-scale dists disabled: 'twopoint', 'exp', 'gamma', 'lognormal'
 # per-trait DIRECTION distributions (must match violin's `dir_dists` keys):
-#   'gauss' -- a_t ~ N(0, A/T**p)   ; 'pm' -- a_t = +-sqrt(A/T**p), the paper's model
+#   'gauss' -- a_t ~ N(0, A/T)   ; 'pm' -- a_t = +-sqrt(A/T), the paper's model
 dir_names = ['gauss', 'pm']
-# per-trait scaling a_t ~ sqrt(A / T**p) * direction (must match violin's `a1_scalings`)
-a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
+# per-trait scaling is fixed at a_t ~ sqrt(A/T) * direction; A1_TAG must match
+# violin's `A1_TAG` since it appears in the filenames and baseline .npz keys.
+A1_TAG = 'aT1'
 
 cases = ['A', 'B', 'C', 'D']
 colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
@@ -90,6 +91,8 @@ quantities = {
                 r'$a_{1,l}^2\, p_l (1-p_l)$', 'rank_a1sq_pq',
                 r'$a_{1,l}^2\, p_l(1-p_l)$'),
     'a1sq':    (lambda a1_sq, p: a1_sq * (p > 0),
+###########################################################################################################
+# rank_a1sq_4 case step stage instead of a straight line. this is the reason. 
                 r'$a_{1,l}^2$', 'rank_a1sq',
                 r'$a_{1,l}^2$ (segregating loci)'),
     'p':       (lambda a1_sq, p: p,
@@ -129,9 +132,9 @@ def head_cutoff(mean_curves):
     return int(np.clip(last + RANK_PAD, RANK_MIN, L))
 
 
-for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
-        dist_names, dir_names, a1_scalings.items(), a2_values):
-    tag = f"{dist_name}_{dir_name}_{a1_name}_a2_{a2:.2f}"
+for dist_name, dir_name, a2 in itertools.product(
+        dist_names, dir_names, a2_values):
+    tag = f"{dist_name}_{dir_name}_{A1_TAG}_a2_{a2:.2f}"
     DATA_FILE = f'hist_T_4cases_data_{tag}.npz'
 
     if not os.path.exists(DATA_FILE):
@@ -140,11 +143,11 @@ for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
         continue
 
     print(f"\n############## {DATA_FILE}  (dist = {dist_name}, dir = {dir_name}, "
-          f"a1 = {a1_name}, a2 = {a2:.3f}) ##############")
+          f"a2 = {a2:.3f}) ##############")
     npz = np.load(DATA_FILE)
     T_list = list(npz['T_list'])
 
-    # σ²=0 static baseline (same direction + a1-scaling, cases coincide), if present
+    # σ²=0 static baseline (same direction, cases coincide), if present
     BASE_FILE = f'hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz'
     base_npz = np.load(BASE_FILE) if os.path.exists(BASE_FILE) else None
     if base_npz is None:
@@ -169,8 +172,8 @@ for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
                     qmap(npz[f'{label}_T{T}_a1sq'], npz[f'{label}_T{T}_p']))
             if base_npz is not None:
                 series['baseline'] = rank_summary(
-                    qmap(base_npz[f'{a1_name}_T{T}_a1sq'],
-                         base_npz[f'{a1_name}_T{T}_p']))
+                    qmap(base_npz[f'{A1_TAG}_T{T}_a1sq'],
+                         base_npz[f'{A1_TAG}_T{T}_p']))
             panel_series.append(series)
 
         L_loci = len(panel_series[0][cases[0]][0])           # ranks length = #loci
@@ -213,11 +216,11 @@ for dist_name, dir_name, (a1_name, texp), a2 in itertools.product(
         for pi in range(n, len(axes_flat)):
             axes_flat[pi].axis('off')
 
-        dir_label = {'pm': r'$a_t=\pm\sqrt{A/T^p}$ (paper)',
-                     'gauss': r'$a_t\sim N(0,A/T^p)$'}.get(dir_name, dir_name)
+        dir_label = {'pm': r'$a_t=\pm\sqrt{A/T}$ (paper)',
+                     'gauss': r'$a_t\sim N(0,A/T)$'}.get(dir_name, dir_name)
         fig.suptitle(
             rf'Rank plot of per-locus {qtitle}  '
-            rf'(A~{dist_name}, dir={dir_name}: {dir_label}, $a_t$~{a1_name}, $a^2$={a2:.2f})'
+            rf'(A~{dist_name}, dir={dir_name}: {dir_label}, $a^2$={a2:.2f})'
             '\n(line = mean, band = 25–75%; '
             r'colour = case, black = $\sigma^2{=}0$ baseline; tail cut, head zoomed)',
             fontsize=12,

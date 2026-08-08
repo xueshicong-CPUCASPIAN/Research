@@ -111,7 +111,7 @@ for N in Ns:
 
             plt.violinplot([Vg_sims[str([_,N,V_s,mu])]/(Vg_sims[str([_,N,V_s,mu])]+1) for _ in sigma_e2s],positions=np.log10(sigma_e2s+offset),widths=2e-1,showmeans=True)
 
-            print((2.*V_s)**-1*Vm/(2*L*mu))
+            # print((2.*V_s)**-1*Vm/(2*L*mu))
 
             #Environmental variance set to 1
             #h_2=Vg_mean/(Vg_mean+1)

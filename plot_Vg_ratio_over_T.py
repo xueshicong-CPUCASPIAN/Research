@@ -48,13 +48,15 @@ Vg_static_1 = 4 * L * mu * V_s          # the T=1 value, = single-trait Latter-B
 print(f"Analytic baseline  V_g|sigma^2=0 = 4*L*mu*V_s / T "
       f"(T=1 value = {Vg_static_1:.6g})")
 
-# tags to look for (must match the sweep's dists / a1_scalings / a2_values)
+# tags to look for (must match the sweep's dists / A1_TAG / a2_values)
 a2_values   = np.array([0.03])
 dist_names  = ['const']                 # complex A-scale dists disabled
 # per-trait DIRECTION distributions (must match violin's `dir_dists` keys):
-#   'gauss' -- a_t ~ N(0, A/T**p)   ; 'pm' -- a_t = +-sqrt(A/T**p), the paper's model
+#   'gauss' -- a_t ~ N(0, A/T)   ; 'pm' -- a_t = +-sqrt(A/T), the paper's model
 dir_names   = ['gauss', 'pm']
-a1_scalings = {'aT1': 1.0, 'aTsqrt': 0.5}
+# per-trait scaling is fixed at a_t ~ sqrt(A/T) * direction; A1_TAG must match
+# violin's `A1_TAG` since it appears in the filenames and baseline .npz keys.
+A1_TAG = 'aT1'
 
 cases   = ['A', 'B', 'C', 'D']
 colors  = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
@@ -70,9 +72,9 @@ labels  = {
 # IS the analytic static-optimum prediction. Two things are shown against it:
 #   • simulated σ²=0 baseline / analytic   -> how close the static sim is to theory
 #   • simulated σ²>0 cases A–D / analytic  -> the fluctuating-optimum variance
-for dist_name, dir_name, (a1_name, _), a2 in itertools.product(
-        dist_names, dir_names, a1_scalings.items(), a2_values):
-    tag       = f"{dist_name}_{dir_name}_{a1_name}_a2_{a2:.2f}"
+for dist_name, dir_name, a2 in itertools.product(
+        dist_names, dir_names, a2_values):
+    tag       = f"{dist_name}_{dir_name}_{A1_TAG}_a2_{a2:.2f}"
     DATA_FILE = f'Vg_sweep_T_4cases_{tag}.npz'
     BASE_FILE = f'Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz'
 
@@ -98,7 +100,7 @@ for dist_name, dir_name, (a1_name, _), a2 in itertools.product(
 
     # simulated σ²=0 baseline, also divided by the per-T analytic baseline
     if os.path.exists(BASE_FILE):
-        Vg0    = np.load(BASE_FILE)[a1_name]    # (len(T_list), rep)
+        Vg0    = np.load(BASE_FILE)[A1_TAG]    # (len(T_list), rep)
         ratio0 = Vg0.mean(axis=1) / Vg_static
         sem0   = Vg0.std(axis=1) / np.sqrt(Vg0.shape[1]) / Vg_static
         ax.errorbar(T_list, ratio0, yerr=sem0, marker='s', capsize=3,
@@ -120,7 +122,7 @@ for dist_name, dir_name, (a1_name, _), a2 in itertools.product(
         rf'Genetic variance relative to the analytic static baseline'
         '\n'
         rf'(analytic $4L\mu V_s/T$, $4L\mu V_s={Vg_static_1:.4g}$;  '
-        rf'A~{dist_name}, dir={dir_name}, $a_t$~{a1_name}, $a^2$={a2:.2f})'
+        rf'A~{dist_name}, dir={dir_name}, $a^2$={a2:.2f})'
     )
     ax.legend(fontsize=8, loc='best')
     fig.tight_layout()
