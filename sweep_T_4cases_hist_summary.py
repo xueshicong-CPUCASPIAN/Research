@@ -18,6 +18,13 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
+# ── output directory ──────────────────────────────────────────────────────────
+# Read the .npz files written by sweep_T_4cases_violin.py, and put the figures next
+# to them.  Must match the RESULTS_DIR set in that script.
+RESULTS_DIR = 'results Aug 10'
+OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
+def opath(name):  return os.path.join(OUTDIR, name)
+
 # a2 (mean effect size) swept; currently a single value
 a2_values = np.array([0.03])
 # A-scale distributions produced by sweep_T_4cases_violin.py (must match its `dists` keys)
@@ -41,7 +48,7 @@ labels = {
 for dist_name, dir_name, a2 in itertools.product(
         dist_names, dir_names, a2_values):
     tag = f"{dist_name}_{dir_name}_{A1_TAG}_a2_{a2:.2f}"
-    DATA_FILE = f'hist_T_4cases_data_{tag}.npz'
+    DATA_FILE = opath(f'hist_T_4cases_data_{tag}.npz')
 
     if not os.path.exists(DATA_FILE):
         print(f"[skip] {DATA_FILE} not found. Run sweep_T_4cases_violin.py first "
@@ -117,7 +124,7 @@ for dist_name, dir_name, a2 in itertools.product(
                  fontsize=11)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
     fname = f'hist_T_4cases_summary_{tag}.pdf'
-    plt.savefig(fname, bbox_inches='tight')
+    plt.savefig(opath(fname), bbox_inches='tight')
     plt.close(fig)
     print(f"Saved {fname}")
 

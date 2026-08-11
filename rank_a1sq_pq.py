@@ -45,6 +45,13 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
+# ── output directory ──────────────────────────────────────────────────────────
+# Read the .npz files written by sweep_T_4cases_violin.py, and put the figures next
+# to them.  Must match the RESULTS_DIR set in that script.
+RESULTS_DIR = 'results Aug 10'
+OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
+def opath(name):  return os.path.join(OUTDIR, name)
+
 # ── tail cut-off controls ──────────────────────────────────────────────────────
 # TOP_RANKS: fixed number of leading ranks to show (int), or None to auto-detect.
 # Auto rule: keep ranks whose across-replicate MEAN exceeds TAIL_REL * (rank-1 mean);
@@ -135,7 +142,7 @@ def head_cutoff(mean_curves):
 for dist_name, dir_name, a2 in itertools.product(
         dist_names, dir_names, a2_values):
     tag = f"{dist_name}_{dir_name}_{A1_TAG}_a2_{a2:.2f}"
-    DATA_FILE = f'hist_T_4cases_data_{tag}.npz'
+    DATA_FILE = opath(f'hist_T_4cases_data_{tag}.npz')
 
     if not os.path.exists(DATA_FILE):
         print(f"[skip] {DATA_FILE} not found. Run sweep_T_4cases_violin.py first "
@@ -148,7 +155,7 @@ for dist_name, dir_name, a2 in itertools.product(
     T_list = list(npz['T_list'])
 
     # σ²=0 static baseline (same direction, cases coincide), if present
-    BASE_FILE = f'hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz'
+    BASE_FILE = opath(f'hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz')
     base_npz = np.load(BASE_FILE) if os.path.exists(BASE_FILE) else None
     if base_npz is None:
         print(f"[note] {BASE_FILE} not found; σ²=0 baseline not overlaid.")
@@ -227,6 +234,6 @@ for dist_name, dir_name, a2 in itertools.product(
         )
         plt.tight_layout(rect=[0, 0, 1, 0.94])
         fname = f'{stem}_4cases_{tag}.pdf'
-        plt.savefig(fname, bbox_inches='tight')
+        plt.savefig(opath(fname), bbox_inches='tight')
         plt.close(fig)
         print(f"Saved {fname}")

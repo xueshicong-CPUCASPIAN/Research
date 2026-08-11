@@ -18,6 +18,24 @@ the discarded burn-in shaded, so the choice can be verified against the data.
 
 Each trait effect scales as a_t ~ sqrt(A/T), so E[||a||^2] = E[A] whatever T is.
 
+CROSS-TERM RECORDING.  This script is also the only place the full effect matrix
+a_{il} and the optimum displacement delta exist, so it additionally records, for ONE
+tracked replicate per (T, case), the decomposition of the selection response
+
+    dzbar_m/dt = (1/V_s) [ G_mm delta_m  +  sum_{l != m} G_ml delta_l ]
+                           \___________/    \____________________/
+                              OWN term          CROSS term
+
+together with the per-locus kernel w_i = a_i . delta and the per-trait products
+a_{im} delta_m.  None of this is recoverable from the snapshot data (a_{1,l}^2 loses
+the sign, delta is never stored), which is why it has to be recorded here rather
+than reconstructed later.  cross_term_figs.py turns it into figures without
+re-simulating.
+
+OUTPUT DIRECTORY.  Every file is written to OUTDIR (a dated results folder next to
+this repository), not to the working directory.  Change RESULTS_DIR below to start a
+new batch; all the plotting scripts read the same constant.
+
 The per-trait DIRECTION distribution is selectable via `dir_dists`:
   'gauss' -- a_t ~ N(0, A/T)      (continuous magnitudes; ~8% of loci get Ns<1)
   'pm'    -- a_t = +-sqrt(A/T)    (the PAPER's |a_i| = a model; no neutral loci)
@@ -32,12 +50,27 @@ Output (one set per (A-dist, direction, a2)):
 Plus one sigma^2=0 baseline pair per direction:
   Vg_baseline_sigma0_<direction>_a2_<a2>.npz
   hist_baseline_sigma0_<direction>_a2_<a2>.npz
+Plus one cross-term file per (direction, T, case), read by cross_term_figs.py:
+  cross_term_data_<direction>_T<T>_case<case>_a2_<a2>.npz
 """
 
+import os
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import itertools
 import time
+
+# ── output directory ──────────────────────────────────────────────────────────
+# All outputs (.npz and .pdf) go to a dated results folder next to this repository,
+# so the repo stays code-only and each batch of runs is self-contained.  Every
+# plotting script defines the same two lines, so changing the date here means
+# changing it in all of them.
+RESULTS_DIR = 'results Aug 10'
+OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
+os.makedirs(OUTDIR, exist_ok=True)
+def out(name):  return os.path.join(OUTDIR, name)
 
 # ── parameters ────────────────────────────────────────────────────────────────
 L         = 100
@@ -48,7 +81,10 @@ theta     = 0.0
 sigma_e2  = 1e-3
 maxiter   = 30000
 rep       = 100            # replicates per (T, case)
-T_list    = [1, 5, 20, 100]
+# T=1 and T=2 are cheap and both matter to the cross-term figures: at T=1 the cross
+# term must vanish identically (asserted below), and T=2 is the smallest T at which
+# it exists, so it anchors the "cross vs T" curves.
+T_list    = [1, 2, 5, 20, 100]
 
 # ── burn-in and post-burn-in sampling ─────────────────────────────────────────
 # The population starts monomorphic (p=0 everywhere), so the first few thousand
@@ -75,6 +111,18 @@ SNAP_GENS = list(range(BURN_IN, maxiter + 1, SAMPLE_EVERY))
 n_snap    = len(SNAP_GENS)
 rep_eff   = rep * n_snap   # pooled sample size seen by every downstream script
 assert BURN_IN < maxiter, "BURN_IN must leave at least one snapshot generation"
+
+# ── cross-term recording (one tracked replicate per run) ──────────────────────
+# The decomposition needs the signed effect matrix and delta at EVERY generation, so
+# it cannot use the sparse snapshot grid above.  Recording it for all `rep` replicates
+# would cost hundreds of MB per run, so it is recorded for replicate TRACK_REP only --
+# the replicates are i.i.d., so one of them is a fair sample of the dynamics, and the
+# aggregate statistics still come from all 100.
+TRACK_REP       = 0     # which replicate is followed in detail
+REC_EVERY       = 5     # generations between recordings of delta / own / cross / w
+# The per-trait products a_{im} delta_m form an (L, T) array per recording, so they
+# use a coarser grid and are kept only after burn-in (nothing plots them before it).
+TRAIT_REC_EVERY = 100
 # a2 (mean effect size) swept; currently a single value
 a2_values = np.array([0.03])
 a2 = a2_values[0]          # current value (overwritten inside the sweep loop below)
@@ -183,6 +231,9 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
       trace_gen   -- (n_trace,) generations at which the trajectory was recorded
       trace_Vg    -- (n_trace, rep) focal-trait V_g at those generations, recorded
                      from generation 0 so the burn-in itself stays inspectable.
+      rec         -- dict of the full selection-response decomposition for replicate
+                     TRACK_REP, recorded every REC_EVERY generations (see `record`
+                     below for the contents and shapes).
 
     a1_sq = focal-trait squared effect a_{1,l}^2.  V_g(trait 1) is recovered as
     2 * sum_l a1_sq * p (1-p); returning the per-locus arrays (rather than just
@@ -202,6 +253,15 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
     snap_gens = set(SNAP_GENS)
     snaps_a1sq, snaps_p = [], []
     trace_gen, trace_Vg = [], []
+    # cross-term records for replicate TRACK_REP (see the parameter block)
+    rc_gen, rc_delta, rc_own, rc_cross, rc_Vg, rc_p, rc_w = [], [], [], [], [], [], []
+    rc_tgen, rc_ad, rc_tp = [], [], []
+
+    # The BLAS-backed `@` does not clear the FPU status word before it runs, so it
+    # reports divide/overflow flags left behind by unrelated LAPACK calls (chol_or_svd
+    # above) -- it fires even at t=0 on all-zero, all-finite arrays.  Those warnings are
+    # suppressed here; the explicit finiteness check on pprime below is the real net.
+    old_err = np.seterr(divide='ignore', over='ignore', invalid='ignore')
 
     for t in range(maxiter):
         fixed_loci_1 = (p == 1)
@@ -210,6 +270,35 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
 
         allele_expected = 2 * p
         zbar = np.einsum('lr,lrt->tr', allele_expected, effects)
+
+        # ── cross-term recording, for replicate TRACK_REP ────────────────────
+        # Done here, at the top of the loop, so the delta recorded at generation t is
+        # exactly the delta that drives the selection step of generation t below.  (The
+        # snapshot / trace recording at the bottom of the loop instead describes the
+        # state AFTER the update, i.e. generation t+1 -- the two grids are labelled
+        # accordingly and are not meant to line up.)
+        # Cost is O(L*T) on one replicate; G is never formed.
+        if t % REC_EVERY == 0 or (t >= BURN_IN and t % TRAIT_REC_EVERY == 0):
+            eff0 = effects[:, TRACK_REP, :]                 # (L, T)
+            p0   = p[:, TRACK_REP]                          # (L,)
+            dlt0 = (opt - zbar)[:, TRACK_REP]               # (T,)
+            if t % REC_EVERY == 0:
+                pq0 = p0 * (1 - p0)
+                w0  = eff0 @ dlt0                                    # (L,) a_i . delta
+                Gd0 = 2 * ((w0 * pq0)[:, None] * eff0).sum(axis=0)   # (T,) (G delta)_m
+                Gm0 = 2 * (eff0 ** 2 * pq0[:, None]).sum(axis=0)     # (T,) G_mm = V_g,m
+                own0 = Gm0 * dlt0
+                rc_gen.append(t)
+                rc_delta.append(dlt0.copy())
+                rc_own.append(own0)
+                rc_cross.append(Gd0 - own0)
+                rc_Vg.append(Gm0)
+                rc_p.append(p0.copy())
+                rc_w.append(w0)
+            if t >= BURN_IN and t % TRAIT_REC_EVERY == 0:
+                rc_tgen.append(t)
+                rc_ad.append(eff0 * dlt0[None, :])          # (L, T) a_{im} delta_m
+                rc_tp.append(p0.copy())
 
         # mutation: new alleles
         fixed_loci_0  = (p == 0)
@@ -231,7 +320,12 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
         )
 
         # selection + drift
-        p = np.random.binomial(N, p_prime_sel_opt(p, opt - zbar, effects, V_s)) / N
+        pprime = p_prime_sel_opt(p, opt - zbar, effects, V_s)
+        if not np.isfinite(pprime).all():
+            np.seterr(**old_err)
+            raise FloatingPointError(
+                f'non-finite selection probability at generation {t} (T={T})')
+        p = np.random.binomial(N, pprime) / N
 
         # optimum shift via cholesky factor (one sample per replicate)
         z = np.random.randn(T, rep)
@@ -248,11 +342,29 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
             snaps_a1sq.append(effects[:, :, 0] ** 2)
             snaps_p.append(p.copy())
 
+    np.seterr(**old_err)
+
     # Pool the snapshots along the replicate axis; V_g is recovered downstream as
     # 2 * sum_l a1_sq * p (1-p), which also feeds the histogram scripts.
     a1_sq = np.concatenate(snaps_a1sq, axis=1)   # (L, rep*n_snap)
     p_out = np.concatenate(snaps_p,    axis=1)   # (L, rep*n_snap)
-    return a1_sq, p_out, np.array(trace_gen), np.stack(trace_Vg, axis=0)
+
+    # The per-locus arrays (p, w, ad) dominate the file size and are only ever plotted,
+    # so they are stored single precision; the per-trait series stay float64 because the
+    # T=1 cross-term check below compares them at the 1e-16 level.
+    rec = dict(
+        gen   = np.array(rc_gen),                            # (n_rec,)
+        delta = np.array(rc_delta),                          # (n_rec, T)
+        own   = np.array(rc_own),                            # (n_rec, T) G_mm delta_m
+        cross = np.array(rc_cross),                          # (n_rec, T) sum_{l!=m} G_ml delta_l
+        Vg    = np.array(rc_Vg),                             # (n_rec, T) G_mm
+        p     = np.array(rc_p,  dtype=np.float32),           # (n_rec, L)
+        w     = np.array(rc_w,  dtype=np.float32),           # (n_rec, L) a_i . delta
+        tgen  = np.array(rc_tgen),                           # (n_tr,)
+        ad    = np.array(rc_ad, dtype=np.float32),           # (n_tr, L, T) a_{im} delta_m
+        tp    = np.array(rc_tp, dtype=np.float32),           # (n_tr, L)
+    )
+    return a1_sq, p_out, np.array(trace_gen), np.stack(trace_Vg, axis=0), rec
 
 
 # ── main loop ────────────────────────────────────────────────────────────────
@@ -273,6 +385,10 @@ print("\n############## σ²=0 baseline (static optimum, cases collapse) #######
 # (dir_name, T) -> (generations, mean V_g) so the per-(dist,dir) trace figure below
 # can show the baseline transient next to the four cases.
 baseline_traces = {}
+# (dir_name, a2, T) -> the tracked-replicate record of the sigma^2=0 run.  The cross-term
+# figures draw it as the black reference curve in every case panel, so it is kept in
+# memory here and written into each case's cross_term_data_*.npz below.
+baseline_cross = {}
 # One baseline per direction distribution: a 'pm' run must be compared against a
 # 'pm' baseline, so the direction name goes into the baseline filenames too.
 for dir_name, draw_dir in dir_dists.items():
@@ -284,18 +400,19 @@ for dir_name, draw_dir in dir_dists.items():
             t0 = time.time()
             cov0 = make_cov_matrix(0.0, T, diag_scale='full',
                                    off_sign=+1, off_scale='full')   # all zeros
-            a1_sq, p, tr_gen, tr_Vg = simulate_vec(T, cov0, rep, draw_const, draw_dir)
+            a1_sq, p, tr_gen, tr_Vg, rec0 = simulate_vec(T, cov0, rep, draw_const, draw_dir)
             Vg_T[ti] = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
             # keep the mean trajectory so the main loop can overlay it on the trace figure
             baseline_traces[(dir_name, T)] = (tr_gen, tr_Vg.mean(axis=1))
+            baseline_cross[(dir_name, float(a2), T)] = rec0
             # keep per-locus arrays so the rank/hist scripts can overlay the baseline
             base_pl[f'{A1_TAG}_T{T}_a1sq'] = a1_sq
             base_pl[f'{A1_TAG}_T{T}_p']    = p
             print(f"  baseline dir={dir_name}  T={T}: "
                   f"mean Vg = {Vg_T[ti].mean():.5g}  [{time.time()-t0:.1f}s]")
         base[A1_TAG] = Vg_T
-        np.savez(f'Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz', **base)
-        np.savez(f'hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz', **base_pl)
+        np.savez(out(f'Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz'), **base)
+        np.savez(out(f'hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz'), **base_pl)
         print(f"Saved Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz and "
               f"hist_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz")
 
@@ -316,7 +433,7 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
         for label, cfg in cases.items():
             t0 = time.time()
             cov = make_cov_matrix(sigma_e2, T, **cfg)
-            a1_sq, p, tr_gen, tr_Vg = simulate_vec(T, cov, rep, draw_A, draw_dir)
+            a1_sq, p, tr_gen, tr_Vg, rec = simulate_vec(T, cov, rep, draw_A, draw_dir)
             # focal-trait V_g per pooled sample = 2 * sum_l a_{1,l}^2 p_l(1-p_l)
             Vg = 2 * np.sum(a1_sq * p * (1 - p), axis=0)
             results[label][ti] = Vg
@@ -328,12 +445,43 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
             print(f"  Case {label}: mean h² = {h2.mean():.4f}  std = {h2.std():.4f}  "
                   f"[{time.time()-t0:.1f}s]")
 
+            # ── cross-term file, read by cross_term_figs.py ──────────────────
+            if T == 1:
+                # Correctness check: a single trait has no l != m, so the cross term
+                # must vanish.  It is not bitwise zero -- (G delta)_1 and G_11 delta_1
+                # multiply by delta_1 at different points in the summation, so they
+                # differ by floating-point round-off (a few eps).
+                nz = rec['own'] != 0
+                relmax = np.abs(rec['cross'][nz] / rec['own'][nz]).max() if nz.any() else 0.0
+                assert relmax < 1e-12, f'cross term is nonzero at T=1 (relative {relmax:.3g})'
+                print(f"    T=1 check passed: cross term vanishes "
+                      f"(max relative residual {relmax:.2g}, round-off only)")
+            m_post   = rec['gen'] >= BURN_IN
+            rms_own  = np.sqrt(np.mean(rec['own'][m_post, 0] ** 2))
+            rms_cros = np.sqrt(np.mean(rec['cross'][m_post, 0] ** 2))
+            print(f"    cross term (trait 1, rep {TRACK_REP}, post burn-in): "
+                  f"RMS own = {rms_own:.4g}, RMS cross = {rms_cros:.4g}, "
+                  f"ratio = {rms_cros / rms_own:.3f}")
+            rec0 = baseline_cross[(dir_name, float(a2), T)]
+            ctag = f'{dir_name}_T{T}_case{label}_a2_{a2:.2f}'
+            np.savez(out(f'cross_term_data_{ctag}.npz'),
+                     gen=rec['gen'], delta=rec['delta'], own=rec['own'],
+                     cross=rec['cross'], Vg=rec['Vg'], p=rec['p'], w=rec['w'],
+                     tgen=rec['tgen'], ad=rec['ad'], tp=rec['tp'],
+                     gen0=rec0['gen'], delta0=rec0['delta'], own0=rec0['own'],
+                     cross0=rec0['cross'], Vg0=rec0['Vg'], p0=rec0['p'], w0=rec0['w'],
+                     T=T, L=L, N=N, V_s=V_s, a2=a2, sigma_e2=sigma_e2, rep=rep,
+                     BURN_IN=BURN_IN, REC_EVERY=REC_EVERY,
+                     TRAIT_REC_EVERY=TRAIT_REC_EVERY, TRACK_REP=TRACK_REP,
+                     dir_name=dir_name, case=label)
+            print(f"    Saved cross_term_data_{ctag}.npz")
+
     # ── save ──────────────────────────────────────────────────────────────────
     # (1) per-locus data — consumed by sweep_T_4cases_hist.py, hist_a1sq_pq.py, *_summary.py
-    np.savez(f'hist_T_4cases_data_{tag}.npz', **save_dict)
+    np.savez(out(f'hist_T_4cases_data_{tag}.npz'), **save_dict)
     print(f"\nSaved hist_T_4cases_data_{tag}.npz")
     # (2) derived per-sample Vg (convenience / downstream)
-    np.savez(f'Vg_sweep_T_4cases_{tag}.npz',
+    np.savez(out(f'Vg_sweep_T_4cases_{tag}.npz'),
              T_list=np.array(T_list),
              A=results['A'], B=results['B'], C=results['C'], D=results['D'])
     print(f"Saved Vg_sweep_T_4cases_{tag}.npz")
@@ -377,7 +525,7 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
         f'{SAMPLE_EVERY} gens (dotted) -> {rep_eff} pooled samples per (T, case)',
         fontsize=11)
     figt.tight_layout(rect=[0, 0, 1, 0.93])
-    figt.savefig(f'trace_Vg_over_gens_{tag}.pdf', bbox_inches='tight')
+    figt.savefig(out(f'trace_Vg_over_gens_{tag}.pdf'), bbox_inches='tight')
     plt.close(figt)
     print(f"Saved trace_Vg_over_gens_{tag}.pdf")
 
@@ -441,6 +589,6 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
     ax.grid(True, axis='y', alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(f'violin_T_4cases_{tag}.pdf', bbox_inches='tight')
+    plt.savefig(out(f'violin_T_4cases_{tag}.pdf'), bbox_inches='tight')
     plt.close(fig)
     print(f"Saved violin_T_4cases_{tag}.pdf")
