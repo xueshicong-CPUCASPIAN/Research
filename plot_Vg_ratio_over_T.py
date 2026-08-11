@@ -34,6 +34,13 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
+# ── output directory ──────────────────────────────────────────────────────────
+# Read the .npz files written by sweep_T_4cases_violin.py, and put the figures next
+# to them.  Must match the RESULTS_DIR set in that script.
+RESULTS_DIR = 'results Aug 10'
+OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
+def opath(name):  return os.path.join(OUTDIR, name)
+
 # ── parameters (must match sweep_T_4cases_violin.py) ───────────────────────────
 L         = 100
 mu        = 6.6e-6
@@ -75,8 +82,8 @@ labels  = {
 for dist_name, dir_name, a2 in itertools.product(
         dist_names, dir_names, a2_values):
     tag       = f"{dist_name}_{dir_name}_{A1_TAG}_a2_{a2:.2f}"
-    DATA_FILE = f'Vg_sweep_T_4cases_{tag}.npz'
-    BASE_FILE = f'Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz'
+    DATA_FILE = opath(f'Vg_sweep_T_4cases_{tag}.npz')
+    BASE_FILE = opath(f'Vg_baseline_sigma0_{dir_name}_a2_{a2:.2f}.npz')
 
     if not os.path.exists(DATA_FILE):
         print(f"[skip] {DATA_FILE} not found. Run sweep_T_4cases_violin.py first.")
@@ -128,7 +135,7 @@ for dist_name, dir_name, a2 in itertools.product(
     fig.tight_layout()
 
     out = f'Vg_ratio_over_T_{tag}.pdf'
-    fig.savefig(out)
+    fig.savefig(opath(out))
     print(f"Saved {out}")
 
 plt.show()
