@@ -23,7 +23,13 @@ terms of the V_g for each trait".
 
 Outputs (one set per (direction, T, case) present in OUTDIR):
   fig1abc_cross_<tag>.pdf     -- Fig-1 A/B/C style panels, + D own vs cross over time,
-                                 + E per-locus  a_i . delta  over time
+                                 + E per-locus  a_i . delta  over time,
+                                 + F the SAME quantity for ONE locus, + G that locus's
+                                 allele frequency.  F and G share the x-axis with A-E,
+                                 so a sudden jump in E can be read off against the
+                                 fixation / mutation history of the locus that made it.
+                                 (For the T-scaling of |a_i|, ||delta|| and
+                                 a_i . delta, see mag_over_T_figs.py.)
   cross_over_trait_<tag>.pdf  -- vs TRAIT INDEX: (a) cross term, (b) per-locus
                                  a_{im} delta_m, (c) own vs cross magnitude
   cross_over_T_<dir>_a2_<a2>.pdf          -- vs NUMBER OF TRAITS, all cases
@@ -64,6 +70,18 @@ case_colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1', '0': 'k'}
 # generations of L trajectories overplot into a smear.
 ZOOM_VIEWS = [None, (25000, 30000)]
 
+# Panels F and G follow ONE locus, because panel E overplots all L of them and a jump
+# in a smear of 100 lines cannot be attributed to anything.
+#   None  -> pick it automatically: the locus with the largest single-step jump in
+#            a_i . delta after the burn-in, i.e. the worst offender in panel E.
+#   an int-> follow that locus index (0-based, < L) instead.
+FOCAL_LOCUS = None
+
+# A delta step is called a "global optimum jump" when it exceeds this multiple of the
+# median step.  The OU shift of the optimum is a small smooth increment; a fixation
+# subtracts 2 a_j from the optimum in one generation, which is far larger.
+DELTA_JUMP_FACTOR = 5.0
+
 
 def load(path):
     """Read one cross_term_data_*.npz into a plain dict (arrays stay lazy-free)."""
@@ -88,6 +106,93 @@ def param_str(d):
             f"replicate {d['TRACK_REP']} of {d['rep']}")
 
 
+# ── which locus to follow, and why it jumped ─────────────────────────────────
+# There are exactly two ways a_i . delta can jump for a given locus:
+#   (1) the locus lost (or fixed) its allele and was later hit by a NEW mutation, so
+#       a_i itself was redrawn.  In sweep_T_4cases_violin.py fixation is folded back to
+#       p = 0 (`fixed_loci_1`) with the optimum shifted by -2 a_i, so fixation and loss
+#       BOTH show up in the recorded p as "p hits 0"; the redraw is the 0 -> 1/N
+#       transition that follows.  a_i jumps, delta does not.
+#   (2) ...is what you would expect from a fixation elsewhere, and it does NOT happen.
+#       The fold is delta-NEUTRAL BY CONSTRUCTION: it drops 2 a_j from zbar (p goes to
+#       0) and subtracts the same 2 a_j from opt, so delta = opt - zbar is unchanged
+#       across a fixation.  That is the point of the fold -- it renumbers the phenotype
+#       reference without perturbing the dynamics.  Measured on the T=5 case-D run:
+#       90 fixations, and the largest single step in ||delta|| is 2.5x the median, i.e.
+#       ordinary random-walk motion, with no outliers at all.
+# So mechanism (1) is the ONLY way a_i . delta can jump.  `delta_jumps` below is kept
+# as the null check that says so, and panels F and G mark it; if it ever fires, either
+# the fold has been changed or something else is moving the optimum.
+def locus_events(p_foc):
+    """Recording indices of the per-locus events, reported at the LATER recording.
+
+    `lost`    : p was > 0 and is 0 next     -- allele lost, or fixed and folded to 0.
+    `redrawn` : p was 0 and is > 0 next     -- new mutation, so a_i is a fresh draw.
+    """
+    p_foc = np.asarray(p_foc, dtype=float)
+    zero = p_foc <= 0
+    lost    = np.where(~zero[:-1] &  zero[1:])[0] + 1
+    redrawn = np.where( zero[:-1] & ~zero[1:])[0] + 1
+    return lost, redrawn
+
+
+def delta_jumps(delta, factor=DELTA_JUMP_FACTOR):
+    """Recordings at which ||delta|| moved anomalously -- the null check of note (2).
+
+    Expected to return nothing: the fixation fold is delta-neutral, and with theta = 0
+    the optimum is a random walk whose steps have no heavy tail.  A hit here means the
+    jump in panel F is NOT explained by this locus being re-mutated, and the optimum
+    itself moved -- worth chasing down rather than plotting past.
+    """
+    step = np.linalg.norm(np.diff(np.asarray(delta, dtype=float), axis=0), axis=1)
+    med = np.median(step)
+    if not np.isfinite(med) or med <= 0:
+        return np.array([], dtype=int)
+    return np.where(step > factor * med)[0] + 1
+
+
+def hidden_redraws(w_foc, p_foc, delta, a2, T, dir_name):
+    """Steps where a_i was replaced BETWEEN two recordings, so no p = 0 was sampled.
+
+    REC_EVERY is 5 generations while a new mutation's median lifetime at these
+    parameters is ~10, so a lose-and-re-mutate cycle can complete inside one recording
+    gap.  Both sampled endpoints then have p > 0, `locus_events` sees nothing, and the
+    jump appears INSIDE a segregating (blue) segment with no red line under it.
+
+    They are still identifiable, because a frozen effect vector can only move w by
+        |dw| = |a_i . d(delta)| <= |a_i| ||d(delta)||,
+    and |a_i| has a hard ceiling: sqrt(a2) exactly for 'pm', and for 'gauss'
+    |a_i|^2 = (a2/T) chi^2_T, whose 99.9th percentile follows from Wilson-Hilferty.
+    Anything above that ceiling cannot be the same vector on both sides.
+
+    Returns the recording indices, and the ceiling on |dw| itself, which is the number
+    to quote when reading the panel: any visible jump bigger than it is a hidden redraw.
+    """
+    if dir_name == 'pm':
+        a_max = np.sqrt(a2)                       # |a_i| = sqrt(a2) identically
+    else:
+        z = 3.0902                                # standard normal 99.9th percentile
+        chi = T * (1 - 2 / (9 * T) + z * np.sqrt(2 / (9 * T))) ** 3
+        a_max = np.sqrt(a2 / T * chi)
+    dstep = np.linalg.norm(np.diff(np.asarray(delta, dtype=float), axis=0), axis=1)
+    ceiling = a_max * dstep
+    dw = np.abs(np.diff(np.asarray(w_foc, dtype=float)))
+    both = (p_foc[:-1] > 0) & (p_foc[1:] > 0)
+    return np.where(both & (dw > ceiling))[0] + 1, float(ceiling.max())
+
+
+def pick_locus(d):
+    """The locus with the largest single-step jump in a_i . delta after the burn-in."""
+    m = d['gen'] >= d['BURN_IN']
+    W = np.asarray(d['w'], dtype=float)[m]
+    P = np.asarray(d['p'], dtype=float)[m]
+    step = np.abs(np.diff(W, axis=0))
+    # A step only counts if the locus is segregating at one of its two ends: a stale
+    # row (p = 0 on both sides) still "moves", but only because delta moved.
+    step = np.where((P[:-1] > 0) | (P[1:] > 0), step, 0.0)
+    return int(np.argmax(step.max(axis=0)))
+
+
 # ── figure 1: Fig-1 A/B/C style panels, cross term, and a_i . delta ───────────
 def fig1_style(d, tag, zoom=None):
     """`zoom` is None (whole run) or a (first_gen, last_gen) window applied to all
@@ -95,8 +200,12 @@ def fig1_style(d, tag, zoom=None):
     BURN_IN, V_s, L = d['BURN_IN'], d['V_s'], d['L']
     m = d['gen'] >= BURN_IN
     m0 = d['gen0'] >= BURN_IN
-    # sharex: all five panels cover the same generations (see the ZOOM note above).
-    fig, axes = plt.subplots(5, 1, figsize=(10, 15), sharex=True)
+    # sharex: all seven panels cover the same generations (see the ZOOM note above).
+    # That shared axis is the point of F and G: a jump in the E smear lines up
+    # vertically with the event in G that caused it.
+    fig, axes = plt.subplots(7, 1, figsize=(10, 21), sharex=True)
+    i_foc = pick_locus(d) if FOCAL_LOCUS is None else int(FOCAL_LOCUS)
+    REC = d['REC_EVERY']
 
     def masked(Pm):
         M = np.asarray(Pm, dtype=float).copy()
@@ -185,7 +294,6 @@ def fig1_style(d, tag, zoom=None):
     ax.plot(d['gen'], mean_w, color='C0', lw=0.9, label='mean over segregating loci')
     ax.axhline(0, color='0.6', lw=0.5)
     ax.axvspan(0, BURN_IN, color='0.88', zorder=0)
-    ax.set_xlabel('Generation')
     ax.set_ylabel(r'$\vec{a}_i\cdot\vec{\delta}$')
     ax.legend(fontsize=8, loc='upper right')
     rms_w = np.sqrt(np.nanmean(Wf[m] ** 2))
@@ -194,10 +302,74 @@ def fig1_style(d, tag, zoom=None):
                  f'post burn-in RMS {rms_w:.3g})',
                  fontsize=10, loc='left')
 
+    # F: the SAME quantity as E, but for ONE locus -- the close-up that makes the
+    # jumps in the E smear attributable.  Same x-axis, so F, G and E line up.
+    w_foc = np.asarray(d['w'], dtype=float)[:, i_foc]
+    p_foc = np.asarray(d['p'], dtype=float)[:, i_foc]
+    seg_foc = p_foc > 0
+    lost, redrawn = locus_events(p_foc)
+    djumps = delta_jumps(d['delta'])
+    hidden, w_ceiling = hidden_redraws(w_foc, p_foc, d['delta'], d['a2'],
+                                       T, d['dir_name'])
+
+    def mark(ax, idx, color, label, ls='--'):
+        for j, k in enumerate(idx):
+            ax.axvline(d['gen'][k], color=color, ls=ls, lw=0.8, alpha=0.75,
+                       label=label if j == 0 else None)
+
+    ax = axes[5]
+    # Segregating stretches solid, stale stretches faint: the effect row of a locus at
+    # p = 0 is left over from its previous allele, so its dot product is not acting --
+    # the same convention that masks those loci out of panel E.
+    ax.plot(d['gen'], np.where(seg_foc, w_foc, np.nan), color='C0', lw=0.9,
+            label=r'$\vec{a}_i\cdot\vec{\delta}$ (segregating)')
+    ax.plot(d['gen'], np.where(seg_foc, np.nan, w_foc), color='0.75', lw=0.7,
+            label=r'$p=0$: stale effect row, not acting')
+    ax.axhline(0, color='0.6', lw=0.5)
+    ax.axvspan(0, BURN_IN, color='0.88', zorder=0)
+    mark(ax, redrawn, 'C3', r'new mutation: $\vec{a}_i$ redrawn')
+    mark(ax, lost,    'C2', r'allele lost / fixed ($p\to0$)', ls=':')
+    mark(ax, hidden,  'C5', 'redraw hidden inside the recording gap', ls='--')
+    mark(ax, djumps,  'C4', r'anomalous $\|\Delta\vec\delta\|$ (null check: expected empty)',
+         ls='-.')
+    ax.set_ylabel(r'$\vec{a}_i\cdot\vec{\delta}$  (locus %d)' % i_foc)
+    ax.legend(fontsize=7, loc='upper right', ncol=2)
+    seg_post = m & seg_foc
+    rms_foc = np.sqrt(np.mean(w_foc[seg_post] ** 2)) if seg_post.any() else np.nan
+    ax.set_title(r'F  $\vec{a}_i\cdot\vec{\delta}$ for the SINGLE locus '
+                 rf'$i={i_foc}$ of $L={L}$'
+                 + ('  (auto-selected: largest post burn-in jump)'
+                    if FOCAL_LOCUS is None else '')
+                 + f'.  post burn-in RMS {rms_foc:.3g};  {len(hidden)} redraws '
+                 + f'hidden in the {REC}-gen gap  '
+                 + rf'(a frozen $\vec{{a}}_i$ cannot move $w$ by more than '
+                 + f'{w_ceiling:.3g})', fontsize=10, loc='left')
+
+    # G: the allele frequency of that same locus, so each jump in F can be checked
+    # against "was the reason a fixation?" -- the question these two panels exist for.
+    ax = axes[6]
+    ax.plot(d['gen'], p_foc, color='C1', lw=0.9)
+    ax.axhline(0, color='0.6', lw=0.5)
+    ax.axvspan(0, BURN_IN, color='0.88', zorder=0)
+    mark(ax, redrawn, 'C3', r'new mutation: $\vec{a}_i$ redrawn')
+    mark(ax, lost,    'C2', r'allele lost / fixed ($p\to0$)', ls=':')
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlabel('Generation')
+    ax.set_ylabel('$p$  (locus %d)' % i_foc)
+    if ax.get_legend_handles_labels()[0]:      # a locus that never turned over
+        ax.legend(fontsize=7, loc='upper right')
+    p_before = p_foc[:-1][np.diff((p_foc <= 0).astype(int)) == 1]
+    n_fix = int((p_before > 0.9).sum())          # p = 1 - 1/N, folded to 0 next step
+    ax.set_title(f'G  Allele frequency of the SAME locus $i={i_foc}$  '
+                 f'({len(redrawn)} mutation events; {len(lost)} exits, of which '
+                 f'{n_fix} were fixations folded to $p=0$ and {len(lost) - n_fix} '
+                 'were losses)', fontsize=10, loc='left')
+
     axes[0].set_xlim(*(zoom if zoom else (0, d['gen'].max())))
 
     fig.suptitle(f"Selection-response decomposition, T = {d['T']}, case {d['case']} "
-                 f"({case_labels[d['case']]})\n{param_str(d)}", fontsize=11)
+                 f"({case_labels[d['case']]})\n{param_str(d)}"
+                 f"  |  panels F, G follow locus {i_foc}", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     suffix = '' if zoom is None else f'_gen{zoom[0]}-{zoom[1]}'
     fig.savefig(out(f'fig1abc_cross_{tag}{suffix}.pdf'), bbox_inches='tight')
