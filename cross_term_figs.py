@@ -47,7 +47,7 @@ import matplotlib.pyplot as plt
 # ── output directory ──────────────────────────────────────────────────────────
 # Must match sweep_T_4cases_violin.py: this is where its .npz files were written and
 # where these figures are put.
-RESULTS_DIR = 'results Aug 10'
+RESULTS_DIR = 'results Sep 15'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def out(name):  return os.path.join(OUTDIR, name)
 

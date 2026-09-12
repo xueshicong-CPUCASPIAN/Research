@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 # ── output directory ──────────────────────────────────────────────────────────
 # Read the .npz files written by sweep_T_4cases_violin.py, and put the figures next
 # to them.  Must match the RESULTS_DIR set in that script.
-RESULTS_DIR = 'results Aug 10'
+RESULTS_DIR = 'results Sep 15'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def opath(name):  return os.path.join(OUTDIR, name)
 

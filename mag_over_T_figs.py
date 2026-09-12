@@ -69,18 +69,21 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # ── output directory (must match sweep_T_4cases_violin.py / cross_term_figs.py) ──
-RESULTS_DIR = 'results Aug 10'
+RESULTS_DIR = 'results Sep 15'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def out(name):  return os.path.join(OUTDIR, name)
 
-CASE_LIST = ['A', 'B', 'C', 'D']
+CASE_LIST = ['A', 'B', 'C', 'D', 'E', 'F']
 case_labels = {
-    'A': r'A: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=+\sigma^2$',
-    'B': r'B: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=-\sigma^2$',
-    'C': r'C: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=+\sigma^2/T$',
-    'D': r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
+    'A':  r'A: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=+\sigma^2$',
+    'B':  r'B: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=-\sigma^2$',
+    'C':  r'C: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=+\sigma^2/T$',
+    'D':  r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
+    'E':  r'E: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=0$',
+    'F':  r'F: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=0$',
 }
-case_colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1', '0': 'k'}
+case_colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1', 'E': 'C4', 'F': 'C5',
+               '0': 'k'}
 
 
 def load(path):
@@ -100,9 +103,13 @@ def load(path):
 
 
 def param_str(d):
-    return (f"L={d['L']}, N={d['N']}, $V_s$={d['V_s']:g}, $a^2$={d['a2']:g}, "
-            rf"$\sigma^2$={d['sigma_e2']:g}, dir={d['dir_name']}, "
-            f"replicate {d['TRACK_REP']} of {d['rep']}")
+    return (rf"L={d['L']}, N={d['N']}, $\mu$={float(d['mu']):g}, $V_s$={d['V_s']:g}, "
+            rf"$a^2$={d['a2']:g}, A~{d['dist_name']}, dir={d['dir_name']}, "
+            rf"$\sigma^2$={d['sigma_e2']:g}, $\theta$={float(d['theta']):g}, "
+            f"generations={int(d['maxiter'])}, burn-in={d['BURN_IN']}\n"
+            f"tracked replicate {d['TRACK_REP']} of {d['rep']}, "
+            f"recorded every {d['REC_EVERY']} gens "
+            f"($|\\vec a_i|$ every {d['TRAIT_REC_EVERY']} gens)")
 
 
 def effect_norms(d):
@@ -130,14 +137,15 @@ def effect_norms(d):
     return np.sqrt(np.nansum(a ** 2, axis=2))[seg]
 
 
-def mag_over_T(mag, T_list, dir_name, a2, hdr):
-    fig, axes = plt.subplots(1, 4, figsize=(20, 4.6))
+def mag_over_T(mag, T_list, cases, dir_name, a2, hdr):
+    fig, axes = plt.subplots(1, 4, figsize=(20, 6.4))
     Tarr = np.array(T_list, dtype=float)
 
+    # case colours are explained once, in a single legend row above the panels
     def curve(ax, key, ylabel, title):
-        for case in CASE_LIST:
+        for case in cases:
             ax.plot(T_list, [mag[(case, T)][key] for T in T_list], marker='o',
-                    color=case_colors[case], label=case_labels[case])
+                    color=case_colors[case])
         ax.set_xscale('log'); ax.set_yscale('log')
         ax.set_xticks(T_list); ax.set_xticklabels([str(t) for t in T_list])
         ax.set_xlabel('Number of traits $T$'); ax.set_ylabel(ylabel)
@@ -157,25 +165,24 @@ def mag_over_T(mag, T_list, dir_name, a2, hdr):
           '(b) optimum displacement vs $T$\n'
           r'measured; legend gives the fitted $\|\vec\delta\|\propto T^{\,q}$')
     handles = []
-    for case in CASE_LIST:
+    for case in cases:
         ys = np.array([mag[(case, T)]['delta'] for T in T_list], dtype=float)
         ok = np.isfinite(ys) & (ys > 0)
         q = (np.polyfit(np.log(Tarr[ok]), np.log(ys[ok]), 1)[0] if ok.sum() > 1
              else np.nan)
-        handles.append(plt.Line2D([], [], color=case_colors[case], marker='o',
+        handles.append(plt.Line2D([], [], color=case_colors[case], lw=2,
                                   label=f'{case}:  $q = {q:+.2f}$'))
     axes[1].legend(handles=handles, fontsize=7, title='fitted slope',
-                   title_fontsize=7)
+                   title_fontsize=7, handlelength=1.0, labelspacing=0.2)
 
     # (c) the inner product itself = (a) x (b), so it inherits the case dependence
     curve(axes[2], 'w', r'RMS $|\vec a_i\cdot\vec\delta|$',
           '(c) inner product vs $T$\n'
           r'dashed: exact identity $\sqrt{a^2/T}\,\mathrm{RMS}\|\vec\delta\|$'
           '\n(should land on the markers)')
-    for case in CASE_LIST:
+    for case in cases:
         axes[2].plot(T_list, [np.sqrt(a2 / T) * mag[(case, T)]['delta'] for T in T_list],
                      color=case_colors[case], ls='--', lw=0.9, alpha=0.7)
-    axes[2].legend(fontsize=7)
 
     # (d) the ratio -- ||delta|| cancels, leaving f(T) = sqrt(a2/T) for every case
     curve(axes[3], 'ratio', r'RMS $|\vec a_i\cdot\vec\delta|\,/\,\|\vec\delta\|$',
@@ -186,9 +193,16 @@ def mag_over_T(mag, T_list, dir_name, a2, hdr):
     axes[3].legend(fontsize=7)
 
     fig.suptitle(r'Magnitudes of $\vec a_i$, $\vec\delta$ and $\vec a_i\cdot\vec\delta$'
-                 f' vs NUMBER OF TRAITS  ({hdr}; segregating loci, post burn-in)',
-                 fontsize=11)
-    fig.tight_layout(rect=[0, 0, 1, 0.90])
+                 ' vs NUMBER OF TRAITS  (segregating loci, post burn-in)'
+                 f'\n{hdr}',
+                 fontsize=11, y=0.99)
+    fig.legend(handles=[plt.Line2D([], [], color=case_colors[c], marker='o',
+                                   label=case_labels[c]) for c in cases],
+               loc='upper center', bbox_to_anchor=(0.5, 0.855), ncol=len(cases),
+               fontsize=9, frameon=False)
+    # set margins by hand: tight_layout also makes room for the suptitle, which pushes
+    # the panels far below the legend row
+    fig.subplots_adjust(left=0.05, right=0.99, bottom=0.10, top=0.68, wspace=0.28)
     fname = f'mag_over_T_{dir_name}_a2_{a2:.2f}.pdf'
     fig.savefig(out(fname), bbox_inches='tight')
     plt.close(fig)
@@ -197,7 +211,7 @@ def mag_over_T(mag, T_list, dir_name, a2, hdr):
 
 # ── main ──────────────────────────────────────────────────────────────────────
 PATTERN = re.compile(r'cross_term_data_(?P<dir>\w+?)_T(?P<T>\d+)_'
-                     r'case(?P<case>[A-D])_a2_(?P<a2>[\d.]+)\.npz$')
+                     r'case(?P<case>[A-F])_a2_(?P<a2>[\d.]+)\.npz$')
 
 files = sorted(glob.glob(out('cross_term_data_*.npz')))
 if not files:
@@ -239,11 +253,13 @@ for (dir_name, a2), entries in sorted(groups.items()):
               f"RMS |a.delta| = {mm['w']:.4g}, ratio = {mm['ratio']:.4g} "
               f"(analytic {np.sqrt(a2 / T):.4g})")
 
-    missing = [(c, T) for T in T_seen for c in CASE_LIST if (c, T) not in mag]
-    if missing:
-        print(f"  Skipping mag_over_T: missing {len(missing)} (case, T) combinations, "
-              f"e.g. {missing[:3]}")
+    # plot every case that has all T; a case run only partly (or not yet) is left out
+    cases = [c for c in CASE_LIST if all((c, T) in mag for T in T_seen)]
+    for c in CASE_LIST:
+        if c not in cases:
+            print(f"  [note] case {c} not available at every T; omitted from mag_over_T")
+    if not cases:
         continue
-    mag_over_T(mag, T_seen, dir_name, a2, hdr)
+    mag_over_T(mag, T_seen, cases, dir_name, a2, hdr)
 
 print("\nDone.")
