@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 # ── output directory ──────────────────────────────────────────────────────────
 # Read the .npz files written by sweep_T_4cases_violin.py, and put the figures next
 # to them.  Must match the RESULTS_DIR set in that script.
-RESULTS_DIR = 'results Aug 10'
+RESULTS_DIR = 'results Sep 15'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def opath(name):  return os.path.join(OUTDIR, name)
 
@@ -65,13 +65,15 @@ dir_names   = ['gauss', 'pm']
 # violin's `A1_TAG` since it appears in the filenames and baseline .npz keys.
 A1_TAG = 'aT1'
 
-cases   = ['A', 'B', 'C', 'D']
-colors  = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
+cases   = ['A', 'B', 'C', 'D', 'E', 'F']
+colors  = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1', 'E': 'C4', 'F': 'C5'}
 labels  = {
-    'A': r'A: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=+\sigma^2$',
-    'B': r'B: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=-\sigma^2$',
-    'C': r'C: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=+\sigma^2/T$',
-    'D': r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
+    'A':  r'A: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=+\sigma^2$',
+    'B':  r'B: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=-\sigma^2$',
+    'C':  r'C: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=+\sigma^2/T$',
+    'D':  r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
+    'E':  r'E: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=0$',
+    'F':  r'F: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=0$',
 }
 
 # ── one figure per (dist, a1, a2) ──────────────────────────────────────────────
@@ -95,7 +97,7 @@ for dist_name, dir_name, a2 in itertools.product(
     # per-T analytic baseline 4LμVs/T (matches the array order of T_list)
     Vg_static = Vg_static_1 / np.asarray(T_list, dtype=float)   # (len(T_list),)
 
-    fig, ax = plt.subplots(figsize=[8, 6])
+    fig, ax = plt.subplots(figsize=[9, 7])
 
     # simulated σ²>0 cases, each divided by the per-T analytic baseline
     for c in cases:
@@ -128,8 +130,17 @@ for dist_name, dir_name, a2 in itertools.product(
     ax.set_title(
         rf'Genetic variance relative to the analytic static baseline'
         '\n'
-        rf'(analytic $4L\mu V_s/T$, $4L\mu V_s={Vg_static_1:.4g}$;  '
-        rf'A~{dist_name}, dir={dir_name}, $a^2$={a2:.2f})'
+        rf'(analytic $4L\mu V_s/T$, $4L\mu V_s={Vg_static_1:.4g}$)'
+        '\n'
+        rf"L={int(npz['L'])}, N={int(npz['N'])}, $\mu$={float(npz['mu']):g}, "
+        rf"$V_s$={float(npz['V_s']):g}, $a^2$={float(npz['a2']):g}, "
+        rf"A~{npz['dist_name']}, dir={npz['dir_name']}, "
+        rf"$\sigma^2$={float(npz['sigma_e2']):g}, $\theta$={float(npz['theta']):g}"
+        '\n'
+        f"generations={int(npz['maxiter'])}, burn-in={int(npz['BURN_IN'])}, "
+        f"{int(npz['rep'])} reps x {int(npz['n_snap'])} snapshots "
+        f"(every {int(npz['SAMPLE_EVERY'])} gens), error bars = SEM",
+        fontsize=9
     )
     ax.legend(fontsize=8, loc='best')
     fig.tight_layout()

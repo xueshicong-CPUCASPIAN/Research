@@ -42,6 +42,10 @@ The per-trait DIRECTION distribution is selectable via `dir_dists`:
 It is part of the output tag, so every file says which model produced it:
   tag = <A-dist>_<direction>_aT1_a2_<a2>   e.g. const_pm_aT1_a2_0.03
 
+CASES.  A-D have correlated traits; E = (sigma^2/T) I and F = sigma^2 I have none.
+All six are simulated.  The filenames still say "4cases" so the hist/rank scripts keep
+finding them (they read only A-D).
+
 Output (one set per (A-dist, direction, a2)):
   hist_T_4cases_data_<tag>.npz  -- per-locus a_{1,l}^2 and p_l (read by hist scripts)
   Vg_sweep_T_4cases_<tag>.npz   -- final Vg per (case, T, replicate) (derived)
@@ -67,7 +71,7 @@ import time
 # so the repo stays code-only and each batch of runs is self-contained.  Every
 # plotting script defines the same two lines, so changing the date here means
 # changing it in all of them.
-RESULTS_DIR = 'results Aug 10'
+RESULTS_DIR = 'results Sep 15'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 os.makedirs(OUTDIR, exist_ok=True)
 def out(name):  return os.path.join(OUTDIR, name)
@@ -248,6 +252,10 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
     effects = np.zeros((L, rep, T))
     opt = np.zeros((T, rep))
     p   = np.zeros((L, rep))
+    # generation at which the allele now at each (locus, rep) arose (-1 = never).  It
+    # tells apart two different alleles that occupy the same locus at different times,
+    # which the autocovariance of a_i . delta (autocov_w_figs.py) must not pair up.
+    birth = np.full((L, rep), -1, dtype=np.int32)
     Lchol = chol_or_svd(cov)
 
     snap_gens = set(SNAP_GENS)
@@ -256,6 +264,7 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
     # cross-term records for replicate TRACK_REP (see the parameter block)
     rc_gen, rc_delta, rc_own, rc_cross, rc_Vg, rc_p, rc_w = [], [], [], [], [], [], []
     rc_tgen, rc_ad, rc_tp = [], [], []
+    rc_aid = []
 
     # The BLAS-backed `@` does not clear the FPU status word before it runs, so it
     # reports divide/overflow flags left behind by unrelated LAPACK calls (chol_or_svd
@@ -295,6 +304,7 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
                 rc_Vg.append(Gm0)
                 rc_p.append(p0.copy())
                 rc_w.append(w0)
+                rc_aid.append(birth[:, TRACK_REP].copy())
             if t >= BURN_IN and t % TRAIT_REC_EVERY == 0:
                 rc_tgen.append(t)
                 rc_ad.append(eff0 * dlt0[None, :])          # (L, T) a_{im} delta_m
@@ -311,6 +321,7 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
         A_new = draw_A(a2, T, n_new)                            # (n_new,): constant scale a2 per mutation
         effects[idx[0], idx[1], :] = (draw_dir(n_new, T)
                                       * np.sqrt(A_new / T)[:, None])
+        birth[idx] = t
 
         # mutation at polymorphic loci
         poly_loci = np.logical_not(fixed_loci_0) & (p < 1 - 1 / N)
@@ -363,6 +374,7 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
         tgen  = np.array(rc_tgen),                           # (n_tr,)
         ad    = np.array(rc_ad, dtype=np.float32),           # (n_tr, L, T) a_{im} delta_m
         tp    = np.array(rc_tp, dtype=np.float32),           # (n_tr, L)
+        aid   = np.array(rc_aid, dtype=np.int32),            # (n_rec, L) allele birth gen
     )
     return a1_sq, p_out, np.array(trace_gen), np.stack(trace_Vg, axis=0), rec
 
@@ -373,6 +385,19 @@ cases = {
     'B': dict(diag_scale='full',      off_sign=-1, off_scale='full'),
     'C': dict(diag_scale='per_trait', off_sign=+1, off_scale='per_trait'),
     'D': dict(diag_scale='per_trait', off_sign=-1, off_scale='per_trait'),
+    # no covariance between traits: Sigma is diagonal
+    'E': dict(diag_scale='per_trait', off_sign=0,  off_scale='per_trait'),  # (sigma^2/T) I
+    'F': dict(diag_scale='full',      off_sign=0,  off_scale='full'),       # sigma^2 I
+}
+
+case_colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1', 'E': 'C4', 'F': 'C5'}
+case_labels = {
+    'A': r'A: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=+\sigma^2$',
+    'B': r'B: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=-\sigma^2$',
+    'C': r'C: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=+\sigma^2/T$',
+    'D': r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
+    'E': r'E: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=0$',
+    'F': r'F: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=0$',
 }
 
 # ── σ²=0 baseline (static optimum): denominator for the V_g ratio plot ─────────
@@ -467,10 +492,12 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
             np.savez(out(f'cross_term_data_{ctag}.npz'),
                      gen=rec['gen'], delta=rec['delta'], own=rec['own'],
                      cross=rec['cross'], Vg=rec['Vg'], p=rec['p'], w=rec['w'],
-                     tgen=rec['tgen'], ad=rec['ad'], tp=rec['tp'],
+                     tgen=rec['tgen'], ad=rec['ad'], tp=rec['tp'], aid=rec['aid'],
                      gen0=rec0['gen'], delta0=rec0['delta'], own0=rec0['own'],
                      cross0=rec0['cross'], Vg0=rec0['Vg'], p0=rec0['p'], w0=rec0['w'],
+                     aid0=rec0['aid'],
                      T=T, L=L, N=N, V_s=V_s, a2=a2, sigma_e2=sigma_e2, rep=rep,
+                     mu=mu, theta=theta, maxiter=maxiter, dist_name=dist_name,
                      BURN_IN=BURN_IN, REC_EVERY=REC_EVERY,
                      TRAIT_REC_EVERY=TRAIT_REC_EVERY, TRACK_REP=TRACK_REP,
                      dir_name=dir_name, case=label)
@@ -482,15 +509,16 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
     print(f"\nSaved hist_T_4cases_data_{tag}.npz")
     # (2) derived per-sample Vg (convenience / downstream)
     np.savez(out(f'Vg_sweep_T_4cases_{tag}.npz'),
-             T_list=np.array(T_list),
-             A=results['A'], B=results['B'], C=results['C'], D=results['D'])
+             T_list=np.array(T_list), **results,
+             L=L, N=N, V_s=V_s, mu=mu, theta=theta, sigma_e2=sigma_e2, a2=a2,
+             maxiter=maxiter, rep=rep, BURN_IN=BURN_IN, SAMPLE_EVERY=SAMPLE_EVERY,
+             n_snap=n_snap, dist_name=dist_name, dir_name=dir_name)
     print(f"Saved Vg_sweep_T_4cases_{tag}.npz")
 
     # ── V_g trajectory over generations (burn-in diagnostic) ─────────────────
     # One panel per T; each curve is the across-replicate mean V_g.  The discarded
     # burn-in is shaded and the snapshot generations are marked, so the choice of
     # BURN_IN can be checked against the data rather than taken on trust.
-    tr_colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
     ncol = 2
     nrow = int(np.ceil(len(T_list) / ncol))
     figt, axest = plt.subplots(nrow, ncol, figsize=(7.0 * ncol, 4.2 * nrow),
@@ -503,7 +531,7 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
                  fontsize=8, color='0.35')
         for label in cases:
             g, v = traces[(T, label)]
-            axt.plot(g, v, color=tr_colors[label], lw=1.2, label=f'case {label}')
+            axt.plot(g, v, color=case_colors[label], lw=1.2, label=f'case {label}')
         if (dir_name, T) in baseline_traces:
             g, v = baseline_traces[(dir_name, T)]
             axt.plot(g, v, color='k', lw=1.4, label=r'$\sigma^2=0$ baseline')
@@ -530,17 +558,11 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
     print(f"Saved trace_Vg_over_gens_{tag}.pdf")
 
     # ── violin plot ──────────────────────────────────────────────────────────
-    colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1'}
-    labels = {
-        'A': r'A: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=+\sigma^2$',
-        'B': r'B: $\Sigma_{ii}=\sigma^2,\ \Sigma_{ij}=-\sigma^2$',
-        'C': r'C: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=+\sigma^2/T$',
-        'D': r'D: $\Sigma_{ii}=\sigma^2/T,\ \Sigma_{ij}=-\sigma^2/T$',
-    }
+    colors, labels = case_colors, case_labels
 
     fig, ax = plt.subplots(figsize=[14, 7])
 
-    n_cases = 4
+    n_cases = len(cases)
     # wider x-axis units (×8 instead of ×4) → more room per T group → fatter violins
     x_scale = 8.0
     displ   = np.linspace(-0.60, 0.60, n_cases)   # spread per case at each T
@@ -548,12 +570,12 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
 
     # compute y-range from the data so violins fill the panel
     all_h2 = np.concatenate([
-        (results[c] / (1 + results[c])).ravel() for c in ['A', 'B', 'C', 'D']
+        (results[c] / (1 + results[c])).ravel() for c in cases
     ])
     y_lo = max(0.0, all_h2.min() - 0.01)
     y_hi = all_h2.max() + 0.01
 
-    for ci, label in enumerate(['A', 'B', 'C', 'D']):
+    for ci, label in enumerate(cases):
         for ti, T in enumerate(T_list):
             Vg = results[label][ti]
             h2 = Vg / (1 + Vg)
