@@ -237,12 +237,14 @@ for (dir_name, a2), entries in sorted(groups.items()):
         m = d['gen'] >= d['BURN_IN']
         W = np.asarray(d['w'], dtype=float)[m]
         P = np.asarray(d['p'], dtype=float)[m]
+        # supervisor ask about the def of RMS(||delta||): dn[k] = ||delta(t_k)||_2, norm over traits
         dn = np.linalg.norm(np.asarray(d['delta'], dtype=float)[m], axis=1)
         seg = P > 0                                   # stale rows are not the dynamics
         rat = W / dn[:, None]
         an = effect_norms(d)
         mag[(case, T)] = dict(
             a     = float(np.sqrt(np.nanmean(an ** 2))) if an.size else np.nan,
+            # supervisor ask about the def of RMS(||delta||): sqrt(E[||delta||^2]), not E[||delta||]
             delta = float(np.sqrt(np.mean(dn ** 2))),
             w     = float(np.sqrt(np.mean(W[seg] ** 2))),
             ratio = float(np.sqrt(np.mean(rat[seg] ** 2))),
