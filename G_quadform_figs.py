@@ -18,6 +18,8 @@ How each quantity is obtained from the saved data:
 Output (in the results folder):
   G_matrix_<dir>_case<c>_a2_<a2>.pdf   rows: one snapshot / time mean / time variance
                                        of G_tr; one column per T  (matshow heat maps)
+  DD_matrix_<dir>_case<c>_a2_<a2>.pdf  same layout for delta_t delta_r, on the REC_EVERY
+                                       grid (Q is the element-wise sum of G_tr delta_t delta_r)
   quadform_GDD_<dir>_a2_<a2>.pdf       E[Q], Var(Q), Var(Q)/E[Q]^2 vs T, all cases
   quadform_GDD_trace_<dir>_a2_<a2>.pdf Q(generation), rows = cases, cols = T
 """
@@ -31,7 +33,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # ── output directory (must match sweep_T_4cases_violin.py / var_delta_sq_figs.py) ──
-RESULTS_DIR = 'results Sep 15'
+RESULTS_DIR = 'results_Nov_2_L_1000'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def out(name):  return os.path.join(OUTDIR, name)
 
@@ -106,31 +108,45 @@ def heat(ax, fig, M, title, symmetric):
     ax.set_xlabel('trait $r$', fontsize=8); ax.set_ylabel('trait $t$', fontsize=8)
 
 
-def figure_G(Gs, T_list, case, dir_name, a2, hdr):
-    """Rows: last snapshot, time mean, time variance of G_tr.  Columns: T."""
+def figure_matrix(Ms, T_list, case, sym, title, grid, fname, hdr):
+    """Rows: last snapshot, time mean, time variance of M_tr.  Columns: T.
+    Ms[T] = (M series (n, T, T), generations); sym is the LaTeX symbol, e.g. 'G_{tr}'."""
     nT = len(T_list)
     fig, axes = plt.subplots(3, nT, figsize=(4.0 * nT, 11.5), squeeze=False)
     for j, T in enumerate(T_list):
-        G, tgen = Gs[T]
-        heat(axes[0, j], fig, G[-1], f'T = {T}: snapshot, gen {tgen[-1]}', True)
-        heat(axes[1, j], fig, G.mean(axis=0), f'T = {T}: time mean', True)
-        heat(axes[2, j], fig, G.var(axis=0), f'T = {T}: time variance', False)
-    for i, lab in enumerate([r'$G_{tr}$ (one generation)',
-                             r'$\langle G_{tr}\rangle_\tau$',
-                             r'Var$_\tau(G_{tr})$']):
+        M, g = Ms[T]
+        heat(axes[0, j], fig, M[-1], f'T = {T}: snapshot, gen {g[-1]}', True)
+        heat(axes[1, j], fig, M.mean(axis=0), f'T = {T}: time mean', True)
+        heat(axes[2, j], fig, M.var(axis=0), f'T = {T}: time variance', False)
+    for i, lab in enumerate([rf'${sym}$ (one generation)',
+                             rf'$\langle {sym}\rangle_\tau$',
+                             rf'Var$_\tau({sym})$']):
         axes[i, 0].annotate(lab, xy=(-0.45, 0.5), xycoords='axes fraction',
                             rotation=90, va='center', ha='center', fontsize=11)
-    fig.suptitle(r'G MATRIX $G_{tr}=2\sum_i p_iq_i\,a_{it}a_{ir}$ vs number of traits, '
-                 f'{case_labels[case]}\n'
+    fig.suptitle(f'{title} vs number of traits, {case_labels[case]}\n'
                  r'red/blue = positive/negative (symmetric scale per panel); '
-                 'tracked replicate, post burn-in, every 100 gens\n'
+                 f'tracked replicate, post burn-in, {grid}\n'
                  f'{hdr}', fontsize=10, y=1.00)
     fig.subplots_adjust(left=0.06, right=0.98, bottom=0.04, top=0.88,
                         wspace=0.45, hspace=0.35)
-    fname = f'G_matrix_{dir_name}_case{case}_a2_{a2:.2f}.pdf'
     fig.savefig(out(fname), bbox_inches='tight')
     plt.close(fig)
     print(f"  Saved {fname}")
+
+
+def figure_G(Gs, T_list, case, dir_name, a2, hdr):
+    figure_matrix(Gs, T_list, case, 'G_{tr}',
+                  r'G MATRIX $G_{tr}=2\sum_i p_iq_i\,a_{it}a_{ir}$',
+                  'every 100 gens', f'G_matrix_{dir_name}_case{case}_a2_{a2:.2f}.pdf', hdr)
+
+
+def figure_DD(Ds, T_list, case, dir_name, a2, rec_every, hdr):
+    """The lag outer product  D_tr = delta_t delta_r  (so Q = sum_tr G_tr D_tr)."""
+    figure_matrix(Ds, T_list, case, r'\delta_t\delta_r',
+                  r'LAG OUTER PRODUCT $\delta_t\delta_r=(\vec\delta\,\vec\delta^{\,T})_{tr}$'
+                  r', $\delta_t=\theta_t-\bar z_t$',
+                  f'every {rec_every} gens',
+                  f'DD_matrix_{dir_name}_case{case}_a2_{a2:.2f}.pdf', hdr)
 
 
 def figure_Q(res, T_list, cases, dir_name, a2, hdr):
@@ -217,7 +233,7 @@ for (dir_name, a2), entries in sorted(groups.items()):
     print(f"{'T':>4} {'case':>4} {'E[Q]':>10} {'Var(Q)':>11} "
           f"{'Var/E^2':>8} {'diag(G) err':>11}")
     T_seen = sorted({T for T, _, _ in entries})
-    res, traces, Gs, hdr = {}, {}, {}, ''
+    res, traces, Gs, Ds, hdr, rec_every = {}, {}, {}, {}, '', None
 
     for T, case, f in sorted(entries):
         d = load(f)
@@ -237,6 +253,8 @@ for (dir_name, a2), entries in sorted(groups.items()):
                               se_E=block_se(Q, np.mean), se_Var=block_se(Q, np.var),
                               se_rel=block_se(Q, rel))
         traces[(case, T)] = (d['gen'][m], Q)
+        Ds.setdefault(case, {})[T] = (np.einsum('kt,kr->ktr', dl, dl), d['gen'][m])
+        rec_every = d['REC_EVERY']
 
         # G on the TRAIT_REC_EVERY grid (already post burn-in)
         G, relerr = G_series(d)
@@ -252,6 +270,7 @@ for (dir_name, a2), entries in sorted(groups.items()):
             print(f"  [note] case {c} not available at every T; omitted")
     for c in cases:
         figure_G(Gs[c], T_seen, c, dir_name, a2, hdr)
+        figure_DD(Ds[c], T_seen, c, dir_name, a2, rec_every, hdr)
     if cases:
         figure_Q(res, T_seen, cases, dir_name, a2, hdr)
         figure_Q_trace(traces, T_seen, cases, dir_name, a2, hdr)

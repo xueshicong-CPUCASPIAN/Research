@@ -71,13 +71,13 @@ import time
 # so the repo stays code-only and each batch of runs is self-contained.  Every
 # plotting script defines the same two lines, so changing the date here means
 # changing it in all of them.
-RESULTS_DIR = 'results Sep 15'
+RESULTS_DIR = 'results_Nov_2_L_1000'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 os.makedirs(OUTDIR, exist_ok=True)
 def out(name):  return os.path.join(OUTDIR, name)
 
 # ── parameters ────────────────────────────────────────────────────────────────
-L         = 100
+L         = 1000
 N         = 10000
 V_s       = 5
 mu        = 6.6e-6
@@ -605,7 +605,7 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
     ax.set_title(r'Violin plot of $h^2$ across replicates ' +
                  f'(A~{dist_name}, dir={dir_name}: {dir_label}, '
                  f'{rep} reps x {n_snap} post-burn-in snapshots = {rep_eff} samples, '
-                 f'$a^2={a2:.2f}$, $\\sigma^2=10^{{-3}}$, $V_s=5$, $N=10^4$, $L=100$)',
+                 f'$a^2={a2:.2f}$, $\\sigma^2=10^{{-3}}$, $V_s=5$, $N=10^4$, $L={L}$)',
                  fontsize=11)
     ax.set_ylim([y_lo, y_hi])
     ax.grid(True, axis='y', alpha=0.3)

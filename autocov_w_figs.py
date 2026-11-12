@@ -38,7 +38,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # ── output directory (must match sweep_T_4cases_violin.py) ────────────────────
-RESULTS_DIR = 'results Sep 15'
+RESULTS_DIR = 'results_Nov_2_L_1000'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def out(name):  return os.path.join(OUTDIR, name)
 

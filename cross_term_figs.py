@@ -47,7 +47,7 @@ import matplotlib.pyplot as plt
 # ── output directory ──────────────────────────────────────────────────────────
 # Must match sweep_T_4cases_violin.py: this is where its .npz files were written and
 # where these figures are put.
-RESULTS_DIR = 'results Sep 15'
+RESULTS_DIR = 'results_Nov_2_L_1000'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def out(name):  return os.path.join(OUTDIR, name)
 
@@ -71,7 +71,7 @@ case_colors = {'A': 'C0', 'B': 'C3', 'C': 'C2', 'D': 'C1', '0': 'k'}
 ZOOM_VIEWS = [None, (25000, 30000)]
 
 # Panels F and G follow ONE locus, because panel E overplots all L of them and a jump
-# in a smear of 100 lines cannot be attributed to anything.
+# in a smear of L lines cannot be attributed to anything.
 #   None  -> pick it automatically: the locus with the largest single-step jump in
 #            a_i . delta after the burn-in, i.e. the worst offender in panel E.
 #   an int-> follow that locus index (0-based, < L) instead.
@@ -214,8 +214,8 @@ def fig1_style(d, tag, zoom=None):
 
     # A: allele frequencies (loci at p=0,1 not drawn), as in Fig 1A
     ax = axes[0]
-    ax.plot(d['gen0'], masked(d['p0']), color='k',    lw=0.35, alpha=0.35)
-    ax.plot(d['gen'],  masked(d['p']),  color='0.45', lw=0.45, alpha=0.55)
+    ax.plot(d['gen0'], masked(d['p0']), color='k',    lw=0.35, alpha=0.35, rasterized=True)
+    ax.plot(d['gen'],  masked(d['p']),  color='0.45', lw=0.45, alpha=0.55, rasterized=True)
     ax.axvspan(0, BURN_IN, color='0.88', zorder=0)
     if zoom is None:
         ax.text(BURN_IN / 2, 0.97,
@@ -286,8 +286,8 @@ def fig1_style(d, tag, zoom=None):
         return W
     Wf = masked_w(d['w'],  d['p'])
     W0 = masked_w(d['w0'], d['p0'])
-    ax.plot(d['gen0'], W0, color='k',    lw=0.35, alpha=0.35)
-    ax.plot(d['gen'],  Wf, color='0.45', lw=0.45, alpha=0.55)
+    ax.plot(d['gen0'], W0, color='k',    lw=0.35, alpha=0.35, rasterized=True)
+    ax.plot(d['gen'],  Wf, color='0.45', lw=0.45, alpha=0.55, rasterized=True)
     with np.errstate(invalid='ignore'):
         # all-NaN rows (no segregating locus) are legitimate early in the burn-in
         mean_w = np.where(np.isnan(Wf).all(axis=1), np.nan, np.nanmean(Wf, axis=1))
