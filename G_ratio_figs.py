@@ -4,11 +4,17 @@ Diagonal against off-diagonal of the G matrix, per trait and over the number of 
 
     f(i) = < G_ii / sum_{j != i} G_ij >        (average over time),   i = trait
 
-and its trait average  (1/T) sum_i f(i),  for L = 100 and L = 1000.
+and its trait average  (1/T) sum_i f(i),  for every run listed in RUNS.
 
 PLOTTING ONLY -- this script runs no simulation.  It reads the cross_term_data_*.npz
 files written by sweep_T_4cases_violin.py (tracked replicate, post burn-in) from each
-folder in RESULTS_DIRS and writes the figures back into the SAME folder.
+folder in RUNS and writes ALL figures into OUT_DIR (the newest results folder); the
+older folders are only read.  Figures of a reference run get its suffix in the name.
+
+Nov 16 run: a_1 = 0, so row and column 1 of G are identically zero and f(1) = 0/0 is
+undefined.  It is left blank in the by-trait figure and excluded from the trait average,
+which is then over traits 2..T.  At T = 2 only one trait has an effect, G has no
+off-diagonal, and the point is absent.  G is built from the saved effects `a`.
 
 Why.  The response of trait i is (G delta)_i = G_ii delta_i + sum_{j != i} G_ij delta_j:
 its own genetic variance plus the summed genetic covariances with the other traits.
@@ -43,9 +49,19 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-# ── data / output folders, one per L (figures go into the folder the data came from) ──
-RESULTS_DIRS = {100: 'results sep 15 OLD', 1000: 'results_Nov_2_L_1000'}
+# ── data folders and the output folder ────────────────────────────────────────
+# (expected L, folder, filename suffix, description).  The first entry is the current
+# run; the others are earlier runs drawn with the SAME y-range for comparison.  Add
+# (1000, 'results_Nov_2_L_1000', '_ref_L1000', 'all traits have an effect, L=1000')
+# to redraw the L = 1000 figures as well.
+RUNS = [
+    (100, 'results_Nov_16',     '',              r'trait 1 neutral, $a_1=0$ (Nov 16 run)'),
+    (100, 'results sep 15 OLD', '_ref_allselected', 'all traits under selection (Sep 15 run)'),
+]
+OUT_DIR = 'results_Nov_16'              # every figure is written here
 HERE = os.path.dirname(os.path.abspath(__file__))
+os.makedirs(os.path.join(HERE, '..', OUT_DIR), exist_ok=True)
+def save_path(name):  return os.path.join(HERE, '..', OUT_DIR, name)
 
 CASE_LIST = ['A', 'B', 'C', 'D', 'E', 'F']
 case_labels = {
@@ -92,6 +108,10 @@ def G_series(d):
     ad    = np.asarray(d['ad'],    dtype=float)                # (n_tr, L, T)
     safe  = np.where(dl == 0, 1.0, dl)
     a     = np.where(dl[:, None, :] == 0, 0.0, ad / safe[:, None, :])
+    if 'a' in d:
+        # Nov 16 onwards the effects are saved directly.  They MUST be used when a trait
+        # is neutral: its stored delta is 0, so ad / delta cannot recover its effects.
+        a = np.asarray(d['a'], dtype=float)
     tp    = np.asarray(d['tp'], dtype=float)
     pq    = tp * (1 - tp)                                      # (n_tr, L)
     return 2 * np.einsum('kl,klt,klr->ktr', pq, a, a)
@@ -141,7 +161,7 @@ def set_yscale(ax, key, abs_ylim=None):
     ax.axhline(1, color='0.5', lw=0.6, ls=':')                 # diagonal = off-diagonal sum
 
 
-def figure_by_trait(fi, T_plot, cases, dir_name, a2, hdr, out, abs_ylim):
+def figure_by_trait(fi, T_plot, cases, dir_name, a2, hdr, suffix, abs_ylim):
     """f(i) against trait index i.  Rows = versions, cols = T."""
     nr, nc = len(VERSIONS), len(T_plot)
     fig, axes = plt.subplots(nr, nc, figsize=(4.0 * nc, 3.0 * nr), squeeze=False)
@@ -173,13 +193,13 @@ def figure_by_trait(fi, T_plot, cases, dir_name, a2, hdr, out, abs_ylim):
                ncol=len(handles), fontsize=8, frameon=False)
     fig.subplots_adjust(left=0.07, right=0.99, bottom=0.05, top=1 - 1.25 / H,
                         hspace=0.25, wspace=0.25)
-    fname = f'G_ratio_by_trait_{dir_name}_a2_{a2:.2f}.pdf'
-    fig.savefig(out(fname), bbox_inches='tight')
+    fname = f'G_ratio_by_trait_{dir_name}_a2_{a2:.2f}{suffix}.pdf'
+    fig.savefig(save_path(fname), bbox_inches='tight')
     plt.close(fig)
     print(f"  Saved {fname}")
 
 
-def figure_over_T(avg, T_plot, cases, dir_name, a2, hdr, out, abs_ylim):
+def figure_over_T(avg, T_plot, cases, dir_name, a2, hdr, suffix, abs_ylim):
     """(1/T) sum_i f(i) against T.  One panel per version."""
     fig, axes = plt.subplots(2, 2, figsize=(13, 10), squeeze=False)
     for ax, (key, (_, _, lab)) in zip(axes.ravel(), VERSIONS.items()):
@@ -202,8 +222,8 @@ def figure_over_T(avg, T_plot, cases, dir_name, a2, hdr, out, abs_ylim):
                  fontsize=10, y=0.995)
     fig.subplots_adjust(left=0.07, right=0.99, bottom=0.06, top=0.90,
                         hspace=0.28, wspace=0.22)
-    fname = f'G_ratio_over_T_{dir_name}_a2_{a2:.2f}.pdf'
-    fig.savefig(out(fname), bbox_inches='tight')
+    fname = f'G_ratio_over_T_{dir_name}_a2_{a2:.2f}{suffix}.pdf'
+    fig.savefig(save_path(fname), bbox_inches='tight')
     plt.close(fig)
     print(f"  Saved {fname}")
 
@@ -213,10 +233,11 @@ PATTERN = re.compile(r'cross_term_data_(?P<dir>\w+?)_T(?P<T>\d+)_'
                      r'case(?P<case>[A-F])_a2_(?P<a2>[\d.]+)\.npz$')
 
 jobs = []           # figures are drawn after all folders are read (shared y-range)
-for L_expected, results_dir in RESULTS_DIRS.items():
+for L_expected, results_dir, suffix, run_label in RUNS:
     outdir = os.path.join(HERE, '..', results_dir)
-    out = lambda name, _d=outdir: os.path.join(_d, name)
-    print(f"\n==================== L = {L_expected}:  {results_dir} ====================")
+    out = lambda name, _d=outdir: os.path.join(_d, name)      # READ path of this run
+    print(f"\n==================== L = {L_expected}:  {results_dir}  ({run_label}) "
+          f"====================")
 
     files = sorted(glob.glob(out('cross_term_data_*.npz')))
     if not files:
@@ -240,7 +261,8 @@ for L_expected, results_dir in RESULTS_DIRS.items():
             if d['L'] != L_expected:
                 print(f"  [warning] {os.path.basename(f)} has L={d['L']}, "
                       f"expected L={L_expected} for folder '{results_dir}'")
-            hdr = (rf"L={d['L']}, N={d['N']}, $\mu$={float(d['mu']):g}, "
+            hdr = (f"{run_label}:  "
+                   rf"L={d['L']}, N={d['N']}, $\mu$={float(d['mu']):g}, "
                    rf"$V_s$={d['V_s']:g}, $a^2$={d['a2']:g}, dir={d['dir_name']}, "
                    rf"$\sigma^2$={d['sigma_e2']:g}, $\theta$={float(d['theta']):g}, "
                    f"generations={int(d['maxiter'])}, burn-in={d['BURN_IN']}, "
@@ -262,10 +284,10 @@ for L_expected, results_dir in RESULTS_DIRS.items():
 
         T_plot = sorted({T for (_, T) in fi})
         cases  = [c for c in CASE_LIST if any((c, T) in fi for T in T_plot)]
-        jobs.append((results_dir, fi, avg, T_plot, cases, dir_name, a2, hdr, out))
+        jobs.append((results_dir, fi, avg, T_plot, cases, dir_name, a2, hdr, suffix))
 
-# One y-range for every abs panel in every figure of every folder, so the L = 100 and
-# L = 1000 PDFs can be compared side by side.  It covers every f(i) and every
+# One y-range for every abs panel in every figure of every run, so the PDFs of the
+# current run and of the reference runs can be compared side by side.  It covers every f(i) and every
 # trait average with its error bar.
 vals = []
 for _, fi, avg, *_ in jobs:
@@ -282,9 +304,10 @@ abs_ylim = (vals.min() / 1.3, vals.max() * 1.3) if len(vals) else None
 if abs_ylim:
     print(f"\nShared y-range of the abs panels: {abs_ylim[0]:.3g} .. {abs_ylim[1]:.3g}")
 
-for results_dir, fi, avg, T_plot, cases, dir_name, a2, hdr, out in jobs:
-    print(f"\n--- figures for {results_dir}, dir = {dir_name}, a2 = {a2:.2f} ---")
-    figure_by_trait(fi, T_plot, cases, dir_name, a2, hdr, out, abs_ylim)
-    figure_over_T(avg, T_plot, cases, dir_name, a2, hdr, out, abs_ylim)
+for results_dir, fi, avg, T_plot, cases, dir_name, a2, hdr, suffix in jobs:
+    print(f"\n--- figures for {results_dir}, dir = {dir_name}, a2 = {a2:.2f} "
+          f"(written to {OUT_DIR}) ---")
+    figure_by_trait(fi, T_plot, cases, dir_name, a2, hdr, suffix, abs_ylim)
+    figure_over_T(avg, T_plot, cases, dir_name, a2, hdr, suffix, abs_ylim)
 
 print("\nDone.")

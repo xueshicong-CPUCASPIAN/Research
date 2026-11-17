@@ -48,9 +48,25 @@ import matplotlib.pyplot as plt
 # ── output directory ──────────────────────────────────────────────────────────
 # Read the .npz files written by sweep_T_4cases_violin.py, and put the figures next
 # to them.  Must match the RESULTS_DIR set in that script.
-RESULTS_DIR = 'results_Nov_2_L_1000'
+RESULTS_DIR = 'results_Nov_16'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def opath(name):  return os.path.join(OUTDIR, name)
+
+# ── focal trait ───────────────────────────────────────────────────────────────
+# The `a1sq` arrays hold the squared effect on the FOCAL trait, which the sweep saves
+# as `focal_trait` (0-based; trait 1 in every run so far).  FL() rewrites the
+# "trait 1" / a_{1,l} wording of a label if the sweep is ever run with another one.
+import glob as _glob
+def _focal_no():
+    for _f in sorted(_glob.glob(os.path.join(OUTDIR, 'hist_T_4cases_data_*.npz'))):
+        _z = np.load(_f)
+        if 'focal_trait' in _z.files:
+            return int(_z['focal_trait']) + 1
+    return 1
+FOCAL_NO = _focal_no()
+def FL(s):
+    return (s.replace('a_{1,l}', 'a_{%d,l}' % FOCAL_NO)
+             .replace('trait 1', 'trait %d' % FOCAL_NO))
 
 # ── tail cut-off controls ──────────────────────────────────────────────────────
 # TOP_RANKS: fixed number of leading ranks to show (int), or None to auto-detect.
@@ -95,13 +111,13 @@ case_titles = {
 # they land in the cut-off tail rather than polluting the head.
 quantities = {
     'a1sq_pq': (lambda a1_sq, p: a1_sq * p * (1 - p),
-                r'$a_{1,l}^2\, p_l (1-p_l)$', 'rank_a1sq_pq',
-                r'$a_{1,l}^2\, p_l(1-p_l)$'),
+                FL(r'$a_{1,l}^2\, p_l (1-p_l)$'), 'rank_a1sq_pq',
+                FL(r'$a_{1,l}^2\, p_l(1-p_l)$')),
     'a1sq':    (lambda a1_sq, p: a1_sq * (p > 0),
 ###########################################################################################################
 # rank_a1sq_4 case step stage instead of a straight line. this is the reason. 
-                r'$a_{1,l}^2$', 'rank_a1sq',
-                r'$a_{1,l}^2$ (segregating loci)'),
+                FL(r'$a_{1,l}^2$'), 'rank_a1sq',
+                FL(r'$a_{1,l}^2$ (segregating loci)')),
     'p':       (lambda a1_sq, p: p,
                 r'$p_l$', 'rank_p',
                 r'$p_l$'),

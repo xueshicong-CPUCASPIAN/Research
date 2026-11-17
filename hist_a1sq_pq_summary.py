@@ -24,9 +24,25 @@ import matplotlib.pyplot as plt
 # ── output directory ──────────────────────────────────────────────────────────
 # Read the .npz files written by sweep_T_4cases_violin.py, and put the figures next
 # to them.  Must match the RESULTS_DIR set in that script.
-RESULTS_DIR = 'results_Nov_2_L_1000'
+RESULTS_DIR = 'results_Nov_16'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def opath(name):  return os.path.join(OUTDIR, name)
+
+# ── focal trait ───────────────────────────────────────────────────────────────
+# The `a1sq` arrays hold the squared effect on the FOCAL trait, which the sweep saves
+# as `focal_trait` (0-based; trait 1 in every run so far).  FL() rewrites the
+# "trait 1" / a_{1,l} wording of a label if the sweep is ever run with another one.
+import glob as _glob
+def _focal_no():
+    for _f in sorted(_glob.glob(os.path.join(OUTDIR, 'hist_T_4cases_data_*.npz'))):
+        _z = np.load(_f)
+        if 'focal_trait' in _z.files:
+            return int(_z['focal_trait']) + 1
+    return 1
+FOCAL_NO = _focal_no()
+def FL(s):
+    return (s.replace('a_{1,l}', 'a_{%d,l}' % FOCAL_NO)
+             .replace('trait 1', 'trait %d' % FOCAL_NO))
 
 # a2 (mean effect size) swept; currently a single value
 a2_values = np.array([0.03])
@@ -96,8 +112,8 @@ for dist_name, dir_name, a2 in itertools.product(
                     marker='o', color=colors[c], label=labels[c], capsize=3)
     ax.set_xscale('log'); ax.set_yscale('log')
     ax.set_xlabel(r'$T$')
-    ax.set_ylabel(r'$E\!\left[a_{1,l}^2\, p_l (1-p_l)\right]$')
-    ax.set_title(rf'(1)  per-locus $E[a_{{1,l}}^2\, p_l(1-p_l)]$  vs $T$   '
+    ax.set_ylabel(FL(r'$E\!\left[a_{1,l}^2\, p_l (1-p_l)\right]$'))
+    ax.set_title(rf'(1)  per-locus $E[a_{{{FOCAL_NO},l}}^2\, p_l(1-p_l)]$  vs $T$   '
                  rf'($a^2={a2:.2f}$)')
     ax.grid(True, which='both', alpha=0.3)
     ax.legend(fontsize=7, loc='best')
@@ -109,9 +125,9 @@ for dist_name, dir_name, a2 in itertools.product(
                     marker='o', color=colors[c], label=labels[c], capsize=3)
     ax.set_xscale('log')
     ax.set_xlabel(r'$T$')
-    ax.set_ylabel(r'$\sum_l a_{1,l}^2\, p_l (1-p_l)$')
-    ax.set_title(rf'(2)  per-replicate $\sum_l a_{{1,l}}^2 p_l(1-p_l)$  vs $T$   '
-                 rf'($a^2={a2:.2f}$)' '\n($V_g$(trait 1)$/2$)')
+    ax.set_ylabel(FL(r'$\sum_l a_{1,l}^2\, p_l (1-p_l)$'))
+    ax.set_title(rf'(2)  per-replicate $\sum_l a_{{{FOCAL_NO},l}}^2 p_l(1-p_l)$  vs $T$   '
+                 rf'($a^2={a2:.2f}$)' f'\n($V_g$(trait {FOCAL_NO})$/2$)')
     ax.grid(True, which='both', alpha=0.3)
 
     fig.suptitle(f'A~{dist_name}, dir={dir_name}, $a^2$={a2:.2f}',
@@ -123,13 +139,13 @@ for dist_name, dir_name, a2 in itertools.product(
     print(f"Saved {fname}")
 
     # ── print numbers ────────────────────────────────────────────────────────
-    print(f"\n=== E[a_{{1,l}}^2 * p_l (1-p_l)]  (per locus, a2={a2:.3f}) ===")
+    print(f"\n=== E[a_{{{FOCAL_NO},l}}^2 * p_l (1-p_l)]  (per locus, a2={a2:.3f}) ===")
     print(f"{'T':>6} | " + "  ".join(f"{c:>11}" for c in cases))
     for ti, T in enumerate(T_list):
         row = "  ".join(f"{mean_per_locus[c][ti]:11.3e}" for c in cases)
         print(f"{T:>6} | {row}")
 
-    print(f"\n=== sum_l a_{{1,l}}^2 * p_l (1-p_l)  (per replicate, mean, a2={a2:.3f}) ===")
+    print(f"\n=== sum_l a_{{{FOCAL_NO},l}}^2 * p_l (1-p_l)  (per replicate, mean, a2={a2:.3f}) ===")
     print(f"{'T':>6} | " + "  ".join(f"{c:>11}" for c in cases))
     for ti, T in enumerate(T_list):
         row = "  ".join(f"{mean_sum_rep[c][ti]:11.3e}" for c in cases)
