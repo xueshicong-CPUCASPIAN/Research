@@ -55,7 +55,7 @@ import matplotlib.pyplot as plt
 # The folder can be given on the command line, e.g.
 #     python delta_autocov_figs.py "results sep 15 OLD"      (the L = 100 data)
 # With no argument the L = 1000 folder is used.
-RESULTS_DIR = sys.argv[1] if len(sys.argv) > 1 else 'results_Nov_2_L_1000'
+RESULTS_DIR = sys.argv[1] if len(sys.argv) > 1 else 'results_Nov_16'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def out(name):  return os.path.join(OUTDIR, name)
 
@@ -65,7 +65,8 @@ TAU_STEP  = 25      # lag spacing, in generations (rounded to a multiple of REC_
 
 TRACE_START = None  # first generation of the trace window; None = start at burn-in
 TRACE_LEN   = 2000  # length of the trace window, in generations
-TRACE_TRAIT = 0     # which trait is traced (0 = trait 1, the focal trait)
+TRACE_TRAIT = 0     # which ACTIVE trait is traced (0 = the first trait with an effect)
+FOCAL_NO    = 1     # its 1-based trait number, for labels; reset from the data files
 TRACE_SHAREY = True # True = one y-axis for every panel; 'row' = shared within a case only
 
 CASE_LIST = ['A', 'B', 'C', 'D', 'E', 'F']
@@ -97,6 +98,25 @@ def as_mode(C, mode):
         return C
     C0 = np.where(C[0] > 0, C[0], np.nan)
     return C / C0
+
+
+def active_delta(z, key):
+    """delta restricted to the traits that are under selection.
+
+    Runs with neutral traits (sweep's NEUTRAL_TRAITS, saved as `neutral_traits`) store 0
+    for delta on those traits (delta_t / V_s,t = 0); they are dropped here so that they
+    neither appear as a flat line nor dilute the trait average.  Column 0 is then the
+    first trait under selection, and FOCAL_NO is its 1-based number (2 when trait 1 is
+    neutral).  Files written before Nov 16 are returned unchanged.
+    """
+    global FOCAL_NO
+    d = np.asarray(z[key], dtype=float)
+    d = d.reshape(len(d), -1)
+    if 'neutral_traits' in z.files and len(z['neutral_traits']):
+        nt = [int(t) for t in z['neutral_traits']]
+        FOCAL_NO = min(t for t in range(d.shape[1]) if t not in nt) + 1
+        d = np.delete(d, nt, axis=1)
+    return d
 
 
 def autocov_delta(gen, delta, burn_in):
@@ -168,8 +188,8 @@ def plot_traits(acf, T_seen, cases, mode, hdr, dir_name, a2):
             if r < nr - 1:
                 ax.set_xlabel('')
     handles = [plt.Line2D([], [], color='0.6', lw=1, label='each trait $m$'),
-               plt.Line2D([], [], color='C0', lw=2, label='trait 1 (case colour)'),
-               plt.Line2D([], [], color='k', lw=2, label=r'trait average $\frac{1}{T}\sum_m$')]
+               plt.Line2D([], [], color='C0', lw=2, label=f'trait {FOCAL_NO} (case colour)'),
+               plt.Line2D([], [], color='k', lw=2, label=r'average over traits under selection')]
     finish(fig, rf'{what} of $\delta_m$, trait by trait', hdr, handles, ncol=3,
            top=1 - 1.45 / (2.9 * nr),
            fname=f'{mode}_delta_traits_{dir_name}_a2_{a2:.2f}.pdf')
@@ -236,13 +256,13 @@ def plot_trace(tr, tr0, T_seen, cases, hdr, dir_name, a2):
                 ax.plot(*tr[(case, T)], color=case_colors[case], lw=0.9)
             ax.set_title(f'case {case},  T = {T}', fontsize=10)
             if c == 0:
-                ax.set_ylabel(rf'$\delta_{{{TRACE_TRAIT + 1}}}(t)$')
+                ax.set_ylabel(rf'$\delta_{{{FOCAL_NO}}}(t)$')
             if r == nr - 1:
                 ax.set_xlabel('generation')
     handles = ([plt.Line2D([], [], color=case_colors[c], lw=2, label=case_labels[c])
                 for c in cases]
                + [plt.Line2D([], [], color='0.6', lw=1.5, label=r'$\sigma^2=0$ baseline')])
-    finish(fig, rf'trace of $\delta_{{{TRACE_TRAIT + 1}}}(t)$ '
+    finish(fig, rf'trace of $\delta_{{{FOCAL_NO}}}(t)$ '
                 f'({TRACE_LEN} generations; y-axis shared '
                 f'{"by all panels" if TRACE_SHAREY is True else "along each row"})',
            hdr, handles, ncol=4, top=1 - 1.75 / (2.3 * nr),
@@ -271,11 +291,12 @@ for (dir_name, a2), entries in sorted(groups.items()):
     for T, case, f in sorted(entries):
         z = np.load(f)
         burn = int(z['BURN_IN'])
-        acf[(case, T)] = autocov_delta(z['gen'], z['delta'], burn)
-        tr[(case, T)]  = trace(z['gen'], z['delta'], burn)
+        dl, dl0 = active_delta(z, 'delta'), active_delta(z, 'delta0')
+        acf[(case, T)] = autocov_delta(z['gen'], dl, burn)
+        tr[(case, T)]  = trace(z['gen'], dl, burn)
         if T not in acf0:                  # sigma^2=0 baseline, identical in every case file
-            acf0[T] = autocov_delta(z['gen0'], z['delta0'], burn)
-            tr0[T]  = trace(z['gen0'], z['delta0'], burn)
+            acf0[T] = autocov_delta(z['gen0'], dl0, burn)
+            tr0[T]  = trace(z['gen0'], dl0, burn)
         hdr = (rf"L={int(z['L'])}, N={int(z['N'])}, $\mu$={float(z['mu']):g}, "
                rf"$V_s$={float(z['V_s']):g}, $a^2$={a2:g}, A~{z['dist_name']}, "
                rf"dir={dir_name}, $\sigma^2$={float(z['sigma_e2']):g}, "
@@ -285,8 +306,8 @@ for (dir_name, a2), entries in sorted(groups.items()):
                f"recorded every {int(z['REC_EVERY'])} gens;  "
                rf"$\tau_{{max}}$={TAU_MAX}, $\tau$ step={TAU_STEP} gens")
         C = acf[(case, T)][1]
-        print(f"  T={T:>3} case {case}: C_1(0) = {C[0, 0]:.4g},  "
-              f"(1/T) sum_m C_m(0) = {C[0].mean():.4g}")
+        print(f"  T={T:>3} case {case}: C_{FOCAL_NO}(0) = {C[0, 0]:.4g},  "
+              f"mean over the {C.shape[1]} traits under selection = {C[0].mean():.4g}")
 
     T_seen   = sorted({T for (_, T) in acf})
     cases    = [c for c in CASE_LIST if any((c, T) in acf for T in T_seen)]

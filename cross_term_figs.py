@@ -47,7 +47,7 @@ import matplotlib.pyplot as plt
 # ── output directory ──────────────────────────────────────────────────────────
 # Must match sweep_T_4cases_violin.py: this is where its .npz files were written and
 # where these figures are put.
-RESULTS_DIR = 'results_Nov_2_L_1000'
+RESULTS_DIR = 'results_Nov_16'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def out(name):  return os.path.join(OUTDIR, name)
 
@@ -97,12 +97,20 @@ def load(path):
     for k in ('dir_name', 'case'):
         if k in d:
             d[k] = str(d[k])
+    # Focal trait (0-based): the trait whose V_g / own / cross terms are plotted
+    # (trait 1).  `neutral` lists the traits with V_s,t -> infinity (1-based): they have
+    # no own term, and the stored delta is 0 on them (the raw one is `delta_full`).
+    d['foc'] = int(d['focal_trait']) if 'focal_trait' in d else 0
+    d['zero'] = ([int(t) + 1 for t in d['neutral_traits']]
+                 if 'neutral_traits' in d else [])
     return d
 
 
 def param_str(d):
+    zero = (rf", $a_t=0$ on trait(s) {d['zero']} ($V_g$ with fixed $a^2$)"
+            if d.get('zero') else '')
     return (f"L={d['L']}, N={d['N']}, $V_s$={d['V_s']:g}, $a^2$={d['a2']:g}, "
-            rf"$\sigma^2$={d['sigma_e2']:g}, dir={d['dir_name']}, "
+            rf"$\sigma^2$={d['sigma_e2']:g}, dir={d['dir_name']}{zero}, "
             f"replicate {d['TRACK_REP']} of {d['rep']}")
 
 
@@ -198,6 +206,7 @@ def fig1_style(d, tag, zoom=None):
     """`zoom` is None (whole run) or a (first_gen, last_gen) window applied to all
     panels at once."""
     BURN_IN, V_s, L = d['BURN_IN'], d['V_s'], d['L']
+    fc = d['foc']; k = fc + 1          # focal trait: 0-based index, 1-based label
     m = d['gen'] >= BURN_IN
     m0 = d['gen0'] >= BURN_IN
     # sharex: all seven panels cover the same generations (see the ZOOM note above).
@@ -230,14 +239,14 @@ def fig1_style(d, tag, zoom=None):
 
     # B: heritability of the focal trait over time, with histogram inset (Fig 1B)
     ax = axes[1]
-    h2  = d['Vg'][:, 0]  / (1 + d['Vg'][:, 0])
-    h20 = d['Vg0'][:, 0] / (1 + d['Vg0'][:, 0])
+    h2  = d['Vg'][:, fc]  / (1 + d['Vg'][:, fc])
+    h20 = d['Vg0'][:, fc] / (1 + d['Vg0'][:, fc])
     ax.plot(d['gen'],  h2,  color='0.45', lw=0.7, label=r'$\sigma^2>0$')
     ax.plot(d['gen0'], h20, color='k',    lw=0.7, label=r'$\sigma^2=0$')
     ax.axvspan(0, BURN_IN, color='0.88', zorder=0)
-    ax.set_ylabel(r'$h^2$ (trait 1)')
+    ax.set_ylabel(rf'$h^2$ (trait {k})')
     ax.legend(fontsize=8, loc='upper right')
-    ax.set_title(r'B  Heritability of trait 1 over time (burn-in shaded).  '
+    ax.set_title(rf'B  Heritability of trait {k} over time (burn-in shaded).  '
                  'Inset: histogram over post-burn-in generations',
                  fontsize=10, loc='left')
     axi = ax.inset_axes([0.62, 0.12, 0.34, 0.42])
@@ -248,11 +257,11 @@ def fig1_style(d, tag, zoom=None):
     # C: optimum displacement delta over time (Fig 1C)
     ax = axes[2]
     # blue / orange / black: black stays with sigma^2=0, matching panels A, B and E.
-    ax.plot(d['gen'], d['delta'][:, 0], color='C0', lw=0.7, label=r'$\delta_1$')
+    ax.plot(d['gen'], d['delta'][:, fc], color='C0', lw=0.7, label=rf'$\delta_{k}$')
     ax.plot(d['gen'], np.linalg.norm(d['delta'], axis=1), color='C1', lw=0.7,
             label=r'$\|\delta\|$')
-    ax.plot(d['gen0'], d['delta0'][:, 0], color='k', lw=0.7,
-            label=r'$\delta_1,\ \sigma^2=0$')
+    ax.plot(d['gen0'], d['delta0'][:, fc], color='k', lw=0.7,
+            label=rf'$\delta_{k},\ \sigma^2=0$')
     ax.axhline(0, color='0.6', lw=0.5)
     ax.axvspan(0, BURN_IN, color='0.88', zorder=0)
     ax.set_ylabel(r'$\delta$')
@@ -261,19 +270,20 @@ def fig1_style(d, tag, zoom=None):
 
     # D: own vs cross contribution to dzbar_1/dt
     ax = axes[3]
-    ax.plot(d['gen'], d['own'][:, 0] / V_s, color='C0', lw=0.7,
-            label=r'own $G_{11}\delta_1/V_s$')
-    ax.plot(d['gen'], d['cross'][:, 0] / V_s, color='C1', lw=0.7,
-            label=r'cross $\sum_{l\neq1}G_{1l}\delta_l/V_s$')
+    ax.plot(d['gen'], d['own'][:, fc] / V_s, color='C0', lw=0.7,
+            label=rf'own $G_{{{k}{k}}}\delta_{k}/V_s$')
+    ax.plot(d['gen'], d['cross'][:, fc] / V_s, color='C1', lw=0.7,
+            label=rf'cross $\sum_{{l\neq{k}}}G_{{{k}l}}\delta_l/V_s$')
     ax.axhline(0, color='0.6', lw=0.5)
     ax.axvspan(0, BURN_IN, color='0.88', zorder=0)
-    ax.set_ylabel(r'contribution to $d\bar z_1/dt$')
+    ax.set_ylabel(rf'contribution to $d\bar z_{k}/dt$')
     ax.legend(fontsize=8, loc='upper right')
-    rms_own   = np.sqrt(np.mean(d['own'][m, 0] ** 2))
-    rms_cross = np.sqrt(np.mean(d['cross'][m, 0] ** 2))
-    ax.set_title('D  Own vs pleiotropic CROSS term for trait 1  '
+    rms_own   = np.sqrt(np.mean(d['own'][m, fc] ** 2))
+    rms_cross = np.sqrt(np.mean(d['cross'][m, fc] ** 2))
+    ax.set_title(f'D  Own vs pleiotropic CROSS term for trait {k}  '
                  f'(post burn-in RMS: own {rms_own:.3g}, cross {rms_cross:.3g}, '
-                 f'ratio {rms_cross / rms_own:.2f})',
+                 + (f'ratio {rms_cross / rms_own:.2f})' if rms_own > 0
+                    else 'both zero: neutral trait, $a_1=0$)'),
                  fontsize=10, loc='left')
 
     # E: per-locus a_i . delta over time.  Only segregating loci are drawn: the effect
@@ -434,8 +444,11 @@ def cross_over_trait_index(d, tag):
     ax.set_xlabel('trait index $m$')
     ax.set_ylabel(r'RMS contribution to $d\bar z_m/dt$')
     ax.set_yscale('log'); ax.legend(fontsize=8)
+    # traits with a_i = 0 have own = cross = 0 exactly: leave them out of the mean
+    with np.errstate(divide='ignore', invalid='ignore'):
+        mean_ratio = np.nanmean(np.where(rms_o > 0, rms_c / rms_o, np.nan))
     ax.set_title(f'own vs cross magnitude per trait\n(mean ratio '
-                 f'{np.mean(rms_c / rms_o):.2f})', fontsize=10)
+                 f'{mean_ratio:.2f})', fontsize=10)
 
     # The number of traits is fixed within a run, so it is not an axis here -- it is
     # annotated in each panel instead, so any single panel stays self-explanatory when
@@ -454,8 +467,9 @@ def cross_over_trait_index(d, tag):
 
 
 # ── figure 3: the cross term as a function of the NUMBER OF TRAITS T ──────────
-def cross_over_T(store, T_list, dir_name, a2, hdr):
-    """store[(case, T)] = dict(cross=..., own=...) for trait 1, post burn-in."""
+def cross_over_T(store, T_list, dir_name, a2, hdr, k=1):
+    """store[(case, T)] = dict(cross=..., own=...) for the focal trait k (1-based),
+    post burn-in."""
     fig, axes = plt.subplots(1, 3, figsize=(17, 5.0))
     x_scale, width = 8.0, 0.45
     displ = np.linspace(-0.60, 0.60, len(CASE_LIST))
@@ -479,15 +493,17 @@ def cross_over_T(store, T_list, dir_name, a2, hdr):
     ax.set_xticks([np.log10(T) * x_scale for T in T_list])
     ax.set_xticklabels([str(T) for T in T_list])
     ax.set_xlabel('Number of traits $T$')
-    ax.set_ylabel(r'cross term $\sum_{l\neq1}G_{1l}\delta_l$')
-    ax.set_title('cross term for trait 1 vs number of traits\n'
+    ax.set_ylabel(rf'cross term $\sum_{{l\neq{k}}}G_{{{k}l}}\delta_l$')
+    ax.set_title(f'cross term for trait {k} vs number of traits\n'
                  '(pooled over post-burn-in generations)', fontsize=10)
 
     # (b) RMS magnitude of both terms vs T
     ax = axes[1]
     # T=1 is dropped from the cross curve only: its cross term is zero by construction
     # (round-off, ~1e-17), which on a log axis would drag the panel down 14 decades.
-    T_cross = [T for T in T_list if T > 1]
+    # The same goes for any other T at which the cross term is identically zero.
+    T_cross = [T for T in T_list if T > 1
+               and all(np.any(store[(c, T)]['cross'] != 0) for c in CASE_LIST)]
     for case in CASE_LIST:
         ro = [np.sqrt(np.mean(store[(case, T)]['own'] ** 2)) for T in T_list]
         rc = [np.sqrt(np.mean(store[(case, T)]['cross'] ** 2)) for T in T_cross]
@@ -500,31 +516,33 @@ def cross_over_T(store, T_list, dir_name, a2, hdr):
     ax.set_xlabel('Number of traits $T$'); ax.set_ylabel('RMS contribution')
     ax.legend(fontsize=7, ncol=2); ax.grid(alpha=0.3)
     ax.set_title('own (dashed) vs cross (solid) magnitude\n'
-                 'vs number of traits  (cross omitted at T=1: it is zero)', fontsize=10)
+                 'vs number of traits  (cross omitted where it is identically zero)',
+                 fontsize=10)
 
     # (c) ratio vs T -- the headline number
     ax = axes[2]
     for case in CASE_LIST:
         ys = [np.sqrt(np.mean(store[(case, T)]['cross'] ** 2))
-              / np.sqrt(np.mean(store[(case, T)]['own'] ** 2)) for T in T_list]
+              / (np.sqrt(np.mean(store[(case, T)]['own'] ** 2)) or np.nan)
+              for T in T_list]
         ax.plot(T_list, ys, marker='o', color=case_colors[case], label=case_labels[case])
     ax.axhline(1, color='0.6', ls='--', lw=0.8)
     ax.set_xscale('log'); ax.set_xticks(T_list)
     ax.set_xticklabels([str(T) for T in T_list])
     ax.set_xlabel('Number of traits $T$'); ax.set_ylabel('RMS cross / RMS own')
     ax.legend(fontsize=7); ax.grid(alpha=0.3)
-    ax.set_title('pleiotropic share of the trait-1 response\n'
+    ax.set_title(f'pleiotropic share of the trait-{k} response\n'
                  '(above 1 = cross term dominates)', fontsize=10)
 
     fig.suptitle('Pleiotropic cross term vs NUMBER OF TRAITS  '
-                 f'({hdr}; trait 1, post burn-in)', fontsize=11)
+                 f'({hdr}; trait {k}, post burn-in)', fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.90])
     fig.savefig(out(f'cross_over_T_{dir_name}_a2_{a2:.2f}.pdf'), bbox_inches='tight')
     plt.close(fig)
     print(f"\nSaved cross_over_T_{dir_name}_a2_{a2:.2f}.pdf")
 
 
-def summary_fig(summary, T_list, dir_name, a2, hdr):
+def summary_fig(summary, T_list, dir_name, a2, hdr, k=1):
     fig, ax = plt.subplots(figsize=(7, 4.6))
     for case in CASE_LIST:
         ax.plot(T_list, [summary[(case, T)] for T in T_list], marker='o',
@@ -533,8 +551,8 @@ def summary_fig(summary, T_list, dir_name, a2, hdr):
     ax.set_xscale('log'); ax.set_xticks(T_list)
     ax.set_xticklabels([str(t) for t in T_list])
     ax.set_xlabel('Number of traits $T$')
-    ax.set_ylabel('RMS cross / RMS own  (trait 1)')
-    ax.set_title('How much of the trait-1 selection response is pleiotropic?\n'
+    ax.set_ylabel(f'RMS cross / RMS own  (trait {k})')
+    ax.set_title(f'How much of the trait-{k} selection response is pleiotropic?\n'
                  f'{hdr}, post burn-in', fontsize=10)
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -572,12 +590,13 @@ for (dir_name, a2), entries in sorted(groups.items()):
         tag = f'{dir_name}_T{T}_case{case}_a2_{a2:.2f}'
         hdr = param_str(d)
         m = d['gen'] >= d['BURN_IN']
-        rms_o = np.sqrt(np.mean(d['own'][m, 0] ** 2))
-        rms_c = np.sqrt(np.mean(d['cross'][m, 0] ** 2))
-        summary[(case, T)] = rms_c / rms_o
-        store[(case, T)] = dict(own=d['own'][m, 0], cross=d['cross'][m, 0])
-        print(f"  T={T:>3} case {case}: RMS own = {rms_o:.4g}, "
-              f"RMS cross = {rms_c:.4g}, ratio = {rms_c / rms_o:.3f}")
+        fc = d['foc']; foc_no = fc + 1
+        rms_o = np.sqrt(np.mean(d['own'][m, fc] ** 2))
+        rms_c = np.sqrt(np.mean(d['cross'][m, fc] ** 2))
+        summary[(case, T)] = rms_c / rms_o if rms_o > 0 else np.nan
+        store[(case, T)] = dict(own=d['own'][m, fc], cross=d['cross'][m, fc])
+        print(f"  T={T:>3} case {case} (trait {foc_no}): RMS own = {rms_o:.4g}, "
+              f"RMS cross = {rms_c:.4g}, ratio = {summary[(case, T)]:.3f}")
 
         if T in FIG_T:
             for zoom in ZOOM_VIEWS:
@@ -590,7 +609,7 @@ for (dir_name, a2), entries in sorted(groups.items()):
         print(f"  Skipping the summary figures: missing {len(missing)} (case, T) "
               f"combinations, e.g. {missing[:3]}")
         continue
-    cross_over_T(store, T_seen, dir_name, a2, hdr)
-    summary_fig(summary, T_seen, dir_name, a2, hdr)
+    cross_over_T(store, T_seen, dir_name, a2, hdr, foc_no)
+    summary_fig(summary, T_seen, dir_name, a2, hdr, foc_no)
 
 print("\nDone.")

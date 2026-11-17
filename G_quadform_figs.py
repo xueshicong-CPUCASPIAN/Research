@@ -33,7 +33,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # ── output directory (must match sweep_T_4cases_violin.py / var_delta_sq_figs.py) ──
-RESULTS_DIR = 'results_Nov_2_L_1000'
+RESULTS_DIR = 'results_Nov_16'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def out(name):  return os.path.join(OUTDIR, name)
 
@@ -74,6 +74,10 @@ def G_series(d):
     ad    = np.asarray(d['ad'],    dtype=float)                # (n_tr, L, T)
     safe  = np.where(dl == 0, 1.0, dl)
     a     = np.where(dl[:, None, :] == 0, 0.0, ad / safe[:, None, :])
+    if 'a' in d:
+        # Nov 16 onwards the effects are saved directly.  They MUST be used when a trait
+        # is neutral: its stored delta is 0, so ad / delta cannot recover its effects.
+        a = np.asarray(d['a'], dtype=float)
     tp    = np.asarray(d['tp'], dtype=float)
     pq    = tp * (1 - tp)                                      # (n_tr, L)
     G     = 2 * np.einsum('kl,klt,klr->ktr', pq, a, a)

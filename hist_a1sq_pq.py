@@ -20,9 +20,25 @@ import matplotlib.pyplot as plt
 # ── output directory ──────────────────────────────────────────────────────────
 # Read the .npz files written by sweep_T_4cases_violin.py, and put the figures next
 # to them.  Must match the RESULTS_DIR set in that script.
-RESULTS_DIR = 'results_Nov_2_L_1000'
+RESULTS_DIR = 'results_Nov_16'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 def opath(name):  return os.path.join(OUTDIR, name)
+
+# ── focal trait ───────────────────────────────────────────────────────────────
+# The `a1sq` arrays hold the squared effect on the FOCAL trait, which the sweep saves
+# as `focal_trait` (0-based; trait 1 in every run so far).  FL() rewrites the
+# "trait 1" / a_{1,l} wording of a label if the sweep is ever run with another one.
+import glob as _glob
+def _focal_no():
+    for _f in sorted(_glob.glob(os.path.join(OUTDIR, 'hist_T_4cases_data_*.npz'))):
+        _z = np.load(_f)
+        if 'focal_trait' in _z.files:
+            return int(_z['focal_trait']) + 1
+    return 1
+FOCAL_NO = _focal_no()
+def FL(s):
+    return (s.replace('a_{1,l}', 'a_{%d,l}' % FOCAL_NO)
+             .replace('trait 1', 'trait %d' % FOCAL_NO))
 
 # a2 (mean effect size) swept; currently a single value
 a2_values = np.array([0.03])
@@ -120,9 +136,9 @@ for dist_name, dir_name, a2 in itertools.product(
                            label=rf'$\sigma^2{{=}}0$ mean = {base_mean:.2e}')
             ax.legend(fontsize=7, loc='upper right')
 
-        axes[-1].set_xlabel(r'$a_{1,l}^2\, p_l (1 - p_l)$')
+        axes[-1].set_xlabel(FL(r'$a_{1,l}^2\, p_l (1 - p_l)$'))
         fig.suptitle(
-            rf'Per-locus $a_{{1,l}}^2\, p_l(1-p_l)$,  T = {T}, $a^2$ = {a2:.2f}, '
+            rf'Per-locus $a_{{{FOCAL_NO},l}}^2\, p_l(1-p_l)$,  T = {T}, $a^2$ = {a2:.2f}, '
             rf'dir={dir_name}'
             '\n(pooled over all loci × replicates; solid = median, dashed = mean)',
             fontsize=12,

@@ -71,13 +71,13 @@ import time
 # so the repo stays code-only and each batch of runs is self-contained.  Every
 # plotting script defines the same two lines, so changing the date here means
 # changing it in all of them.
-RESULTS_DIR = 'results_Nov_2_L_1000'
+RESULTS_DIR = 'results_Nov_16'
 OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', RESULTS_DIR)
 os.makedirs(OUTDIR, exist_ok=True)
 def out(name):  return os.path.join(OUTDIR, name)
 
 # ── parameters ────────────────────────────────────────────────────────────────
-L         = 1000
+L         = 100
 N         = 10000
 V_s       = 5
 mu        = 6.6e-6
@@ -88,7 +88,37 @@ rep       = 100            # replicates per (T, case)
 # T=1 and T=2 are cheap and both matter to the cross-term figures: at T=1 the cross
 # term must vanish identically (asserted below), and T=2 is the smallest T at which
 # it exists, so it anchors the "cross vs T" curves.
-T_list    = [1, 2, 5, 20, 100]
+T_list    = [2, 5, 20, 100]
+
+# ── neutral trait (Nov 16; fix agreed with Jason by email) ────────────────────
+# Selection on the traits in NEUTRAL_TRAITS (0-based) is switched off by giving every
+# mutation a_t = 0 on them:  a_1 = 0,  a_i ~ sqrt(A/T) D_i for i = 2..T.  The 1/T
+# scaling still uses the full T.
+#
+# With a_1 = 0 the usual V_g(trait 1) = 2 sum_l a_{l,1}^2 p_l q_l is identically 0, so
+# V_g of a neutral trait is COMPUTED as though every allele had the same squared effect
+#
+#     V_g(trait 1) = a_1^2 * 2 sum_l p_l q_l ,      a_1^2 = neutral_a1sq(T)
+#
+# i.e. a_1 = 0 inside the simulation, a fixed a_1^2 only when V_g is computed.  V_g1 is
+# then the total heterozygosity times a constant, so the constant CANCELS in the main
+# plot V_g / V_g|sigma^2=0 and only sets the scale of the raw-V_g figures.  It is set to
+# A/T, the mean squared per-trait effect of the earlier runs, so raw V_g1 is directly
+# comparable with them; return a2 instead to use the full effect size A.
+#
+# Still zero by construction for trait 1: the own term G_11 delta_1 and the cross term
+# sum_{l != 1} G_1l delta_l (the G_1l need the SIGN of a_1, which does not exist).
+# In the cross-term files `delta` is 0 on the neutral trait (selection cannot see it;
+# nothing pulls zbar_1 back, so the raw value is a free random walk) and `delta_full`
+# is the raw opt - zbar.
+# T = 1 is left out: no trait would be under selection, and a purely neutral population
+# does not equilibrate within maxiter (time scale ~4N generations).
+# NEUTRAL_TRAITS = [] restores the old model (then T = 1 can go back into T_list).
+NEUTRAL_TRAITS = [0]
+FOCAL_TRAIT = 0            # trait 1, as before
+def neutral_a1sq(T):  return a2 / T
+assert all(T > len(NEUTRAL_TRAITS) for T in T_list), \
+    "every T in T_list needs at least one trait under selection"
 
 # ── burn-in and post-burn-in sampling ─────────────────────────────────────────
 # The population starts monomorphic (p=0 everywhere), so the first few thousand
@@ -190,15 +220,16 @@ dir_dists = {
 def pmap(rho):  return rho / (1 + rho)
 def rhomap(p):  return p / (1 - p)
 
-def p_prime_sel_opt(p, delt, effects, V_s):
+def p_prime_sel_opt(p, delt, effects, V_s, sel):
     """
     p:       (L, rep)
     delt:    (T, rep)
     effects: (L, rep, T)
+    sel:     (T,)  1 for a trait under selection, 0 for a neutral one (V_s,t -> inf)
     """
     S = 1 / (2 * V_s)
-    dot_term = np.einsum('lrt,tr->lr', effects, delt)
-    norm2    = np.sum(effects**2, axis=2)
+    dot_term = np.einsum('lrt,tr->lr', effects, delt * sel[:, None])
+    norm2    = np.sum(effects**2 * sel, axis=2)
     expo = 2 * S * (dot_term + 0.5 * norm2 * (2 * p - 1))
     return pmap(rhomap(p) * np.exp(expo))
 
@@ -239,7 +270,8 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
                      TRACK_REP, recorded every REC_EVERY generations (see `record`
                      below for the contents and shapes).
 
-    a1_sq = focal-trait squared effect a_{1,l}^2.  V_g(trait 1) is recovered as
+    a1_sq = focal-trait squared effect a_{1,l}^2 (the constant neutral_a1sq(T) at every
+    locus when trait 1 is neutral).  V_g(trait 1) is recovered as
     2 * sum_l a1_sq * p (1-p); returning the per-locus arrays (rather than just
     V_g) also lets the histogram scripts reuse this single simulation run.
     """
@@ -257,6 +289,15 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
     # which the autocovariance of a_i . delta (autocov_w_figs.py) must not pair up.
     birth = np.full((L, rep), -1, dtype=np.int32)
     Lchol = chol_or_svd(cov)
+    sel = np.ones(T)                    # 1 = under selection, 0 = neutral trait
+    sel[NEUTRAL_TRAITS] = 0.0
+    a_sq_neutral = neutral_a1sq(T)      # squared effect used ONLY to compute V_g
+
+    def focal_sq():
+        """a_{l,focal}^2, (L, rep), as used to compute V_g of the focal trait."""
+        if FOCAL_TRAIT in NEUTRAL_TRAITS:
+            return np.full((L, rep), a_sq_neutral)
+        return effects[:, :, FOCAL_TRAIT] ** 2
 
     snap_gens = set(SNAP_GENS)
     snaps_a1sq, snaps_p = [], []
@@ -265,6 +306,8 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
     rc_gen, rc_delta, rc_own, rc_cross, rc_Vg, rc_p, rc_w = [], [], [], [], [], [], []
     rc_tgen, rc_ad, rc_tp = [], [], []
     rc_aid = []
+    rc_dfull = []
+    rc_a = []
 
     # The BLAS-backed `@` does not clear the FPU status word before it runs, so it
     # reports divide/overflow flags left behind by unrelated LAPACK calls (chol_or_svd
@@ -290,15 +333,18 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
         if t % REC_EVERY == 0 or (t >= BURN_IN and t % TRAIT_REC_EVERY == 0):
             eff0 = effects[:, TRACK_REP, :]                 # (L, T)
             p0   = p[:, TRACK_REP]                          # (L,)
-            dlt0 = (opt - zbar)[:, TRACK_REP]               # (T,)
+            dlt_full0 = (opt - zbar)[:, TRACK_REP]          # (T,) raw opt - zbar
+            dlt0 = dlt_full0 * sel                          # (T,) as selection sees it
             if t % REC_EVERY == 0:
                 pq0 = p0 * (1 - p0)
                 w0  = eff0 @ dlt0                                    # (L,) a_i . delta
                 Gd0 = 2 * ((w0 * pq0)[:, None] * eff0).sum(axis=0)   # (T,) (G delta)_m
                 Gm0 = 2 * (eff0 ** 2 * pq0[:, None]).sum(axis=0)     # (T,) G_mm = V_g,m
+                Gm0[NEUTRAL_TRAITS] = a_sq_neutral * 2 * pq0.sum()   # V_g with fixed a^2
                 own0 = Gm0 * dlt0
                 rc_gen.append(t)
                 rc_delta.append(dlt0.copy())
+                rc_dfull.append(dlt_full0.copy())
                 rc_own.append(own0)
                 rc_cross.append(Gd0 - own0)
                 rc_Vg.append(Gm0)
@@ -308,6 +354,7 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
             if t >= BURN_IN and t % TRAIT_REC_EVERY == 0:
                 rc_tgen.append(t)
                 rc_ad.append(eff0 * dlt0[None, :])          # (L, T) a_{im} delta_m
+                rc_a.append(eff0.copy())                    # (L, T) a_{im} itself
                 rc_tp.append(p0.copy())
 
         # mutation: new alleles
@@ -319,8 +366,9 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
         # new mutation: scale A = a2 (constant), one per locus*rep event and SAME across
         # traits, plus a fresh direction drawn from `draw_dir`.
         A_new = draw_A(a2, T, n_new)                            # (n_new,): constant scale a2 per mutation
-        effects[idx[0], idx[1], :] = (draw_dir(n_new, T)
-                                      * np.sqrt(A_new / T)[:, None])
+        new_eff = draw_dir(n_new, T) * np.sqrt(A_new / T)[:, None]
+        new_eff[:, NEUTRAL_TRAITS] = 0.0       # a_1 = 0: no selection on trait 1
+        effects[idx[0], idx[1], :] = new_eff
         birth[idx] = t
 
         # mutation at polymorphic loci
@@ -331,7 +379,7 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
         )
 
         # selection + drift
-        pprime = p_prime_sel_opt(p, opt - zbar, effects, V_s)
+        pprime = p_prime_sel_opt(p, opt - zbar, effects, V_s, sel)
         if not np.isfinite(pprime).all():
             np.seterr(**old_err)
             raise FloatingPointError(
@@ -346,11 +394,11 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
         #    generation t+1. ────────────────────────────────────────────────────
         gen = t + 1
         if gen % TRACE_EVERY == 0:
-            a1_sq_now = effects[:, :, 0] ** 2
+            a1_sq_now = focal_sq()
             trace_gen.append(gen)
             trace_Vg.append(2 * np.sum(a1_sq_now * p * (1 - p), axis=0))
         if gen in snap_gens:                     # post-burn-in snapshot
-            snaps_a1sq.append(effects[:, :, 0] ** 2)
+            snaps_a1sq.append(focal_sq())
             snaps_p.append(p.copy())
 
     np.seterr(**old_err)
@@ -365,7 +413,8 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
     # T=1 cross-term check below compares them at the 1e-16 level.
     rec = dict(
         gen   = np.array(rc_gen),                            # (n_rec,)
-        delta = np.array(rc_delta),                          # (n_rec, T)
+        delta = np.array(rc_delta),                          # (n_rec, T) neutral traits -> 0
+        delta_full = np.array(rc_dfull),                     # (n_rec, T) untouched opt - zbar
         own   = np.array(rc_own),                            # (n_rec, T) G_mm delta_m
         cross = np.array(rc_cross),                          # (n_rec, T) sum_{l!=m} G_ml delta_l
         Vg    = np.array(rc_Vg),                             # (n_rec, T) G_mm
@@ -374,6 +423,7 @@ def simulate_vec(T, cov, rep, draw_A, draw_dir):
         tgen  = np.array(rc_tgen),                           # (n_tr,)
         ad    = np.array(rc_ad, dtype=np.float32),           # (n_tr, L, T) a_{im} delta_m
         tp    = np.array(rc_tp, dtype=np.float32),           # (n_tr, L)
+        a     = np.array(rc_a,  dtype=np.float32),           # (n_tr, L, T) a_{im}
         aid   = np.array(rc_aid, dtype=np.int32),            # (n_rec, L) allele birth gen
     )
     return a1_sq, p_out, np.array(trace_gen), np.stack(trace_Vg, axis=0), rec
@@ -418,8 +468,10 @@ baseline_cross = {}
 # 'pm' baseline, so the direction name goes into the baseline filenames too.
 for dir_name, draw_dir in dir_dists.items():
     for a2 in a2_values:                   # sets the global a2 read by simulate_vec
-        base    = {'T_list': np.array(T_list)}   # totals    -> Vg_baseline_sigma0_*.npz
-        base_pl = {'T_list': np.array(T_list)}   # per-locus -> hist_baseline_sigma0_*.npz
+        meta = {'T_list': np.array(T_list), 'focal_trait': FOCAL_TRAIT,
+                'neutral_traits': np.array(NEUTRAL_TRAITS, dtype=int), 'L': L}
+        base    = dict(meta)                     # totals    -> Vg_baseline_sigma0_*.npz
+        base_pl = dict(meta)                     # per-locus -> hist_baseline_sigma0_*.npz
         Vg_T = np.zeros((len(T_list), rep_eff))
         for ti, T in enumerate(T_list):
             t0 = time.time()
@@ -450,7 +502,8 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
     # results[case][T_idx] = Vg array of length rep_eff (replicates x snapshots)
     results = {label: np.zeros((len(T_list), rep_eff)) for label in cases}
     # per-locus arrays saved for the histogram scripts (read by sweep_T_4cases_hist.py etc.)
-    save_dict = {'T_list': np.array(T_list)}
+    save_dict = {'T_list': np.array(T_list), 'focal_trait': FOCAL_TRAIT,
+                 'neutral_traits': np.array(NEUTRAL_TRAITS, dtype=int)}
     traces = {}          # (T, case) -> (generations, mean V_g) for the trace figure
 
     for ti, T in enumerate(T_list):
@@ -481,18 +534,27 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
                 assert relmax < 1e-12, f'cross term is nonzero at T=1 (relative {relmax:.3g})'
                 print(f"    T=1 check passed: cross term vanishes "
                       f"(max relative residual {relmax:.2g}, round-off only)")
+            if NEUTRAL_TRAITS:
+                # Correctness check: a_t = 0 on a neutral trait, so it has neither an own
+                # nor a cross term.
+                for kk in ('own', 'cross'):
+                    assert not np.any(rec[kk][:, NEUTRAL_TRAITS]), \
+                        f'{kk} term is nonzero on a neutral trait'
             m_post   = rec['gen'] >= BURN_IN
-            rms_own  = np.sqrt(np.mean(rec['own'][m_post, 0] ** 2))
-            rms_cros = np.sqrt(np.mean(rec['cross'][m_post, 0] ** 2))
-            print(f"    cross term (trait 1, rep {TRACK_REP}, post burn-in): "
-                  f"RMS own = {rms_own:.4g}, RMS cross = {rms_cros:.4g}, "
-                  f"ratio = {rms_cros / rms_own:.3f}")
+            rms_own  = np.sqrt(np.mean(rec['own'][m_post, FOCAL_TRAIT] ** 2))
+            rms_cros = np.sqrt(np.mean(rec['cross'][m_post, FOCAL_TRAIT] ** 2))
+            print(f"    trait {FOCAL_TRAIT + 1}, rep {TRACK_REP}, post burn-in: "
+                  f"RMS own = {rms_own:.4g}, RMS cross = {rms_cros:.4g}"
+                  + (f", ratio = {rms_cros / rms_own:.3f}" if rms_own > 0
+                     else "  (neutral trait: a_1 = 0, no own / cross term)"))
             rec0 = baseline_cross[(dir_name, float(a2), T)]
             ctag = f'{dir_name}_T{T}_case{label}_a2_{a2:.2f}'
             np.savez(out(f'cross_term_data_{ctag}.npz'),
                      gen=rec['gen'], delta=rec['delta'], own=rec['own'],
                      cross=rec['cross'], Vg=rec['Vg'], p=rec['p'], w=rec['w'],
-                     tgen=rec['tgen'], ad=rec['ad'], tp=rec['tp'], aid=rec['aid'],
+                     tgen=rec['tgen'], ad=rec['ad'], tp=rec['tp'], aid=rec['aid'], a=rec['a'],
+                     delta_full=rec['delta_full'], delta_full0=rec0['delta_full'],
+                     focal_trait=FOCAL_TRAIT, neutral_traits=np.array(NEUTRAL_TRAITS, dtype=int),
                      gen0=rec0['gen'], delta0=rec0['delta'], own0=rec0['own'],
                      cross0=rec0['cross'], Vg0=rec0['Vg'], p0=rec0['p'], w0=rec0['w'],
                      aid0=rec0['aid'],
@@ -512,7 +574,8 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
              T_list=np.array(T_list), **results,
              L=L, N=N, V_s=V_s, mu=mu, theta=theta, sigma_e2=sigma_e2, a2=a2,
              maxiter=maxiter, rep=rep, BURN_IN=BURN_IN, SAMPLE_EVERY=SAMPLE_EVERY,
-             n_snap=n_snap, dist_name=dist_name, dir_name=dir_name)
+             n_snap=n_snap, dist_name=dist_name, dir_name=dir_name,
+             focal_trait=FOCAL_TRAIT, neutral_traits=np.array(NEUTRAL_TRAITS, dtype=int))
     print(f"Saved Vg_sweep_T_4cases_{tag}.npz")
 
     # ── V_g trajectory over generations (burn-in diagnostic) ─────────────────
@@ -541,7 +604,7 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
         axt.set_xlim(0, maxiter)
         axt.set_title(f'T = {T}', fontsize=11)
         axt.set_xlabel('generation')
-        axt.set_ylabel(r'$V_g$(trait 1), mean over replicates')
+        axt.set_ylabel(rf'$V_g$(trait {FOCAL_TRAIT + 1}), mean over replicates')
         axt.grid(True, which='both', alpha=0.3)
         if ti == 0:
             axt.legend(fontsize=8, loc='lower right')
@@ -599,9 +662,12 @@ for (dist_name, draw_A), (dir_name, draw_dir), a2 in itertools.product(
     ax.tick_params(axis='y', labelsize=11)
 
     ax.set_xlabel('Number of trait dimensions $T$', fontsize=13)
-    ax.set_ylabel(r'Heritability $h^2$', fontsize=13)
+    ax.set_ylabel(rf'Heritability $h^2$ (trait {FOCAL_TRAIT + 1})', fontsize=13)
     dir_label = {'pm': r'$a_t=\pm\sqrt{A/T}$ (paper)',
                  'gauss': r'$a_t\sim N(0,A/T)$'}.get(dir_name, dir_name)
+    if NEUTRAL_TRAITS:
+        dir_label += (f', $a_t=0$ on trait(s) {[z + 1 for z in NEUTRAL_TRAITS]}'
+                      r', $V_g$ computed with $a_1^2=A/T$')
     ax.set_title(r'Violin plot of $h^2$ across replicates ' +
                  f'(A~{dist_name}, dir={dir_name}: {dir_label}, '
                  f'{rep} reps x {n_snap} post-burn-in snapshots = {rep_eff} samples, '
